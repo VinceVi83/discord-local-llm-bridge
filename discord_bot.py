@@ -148,6 +148,7 @@ class DiscordBot(discord.Client):
                 await m.attachments[0].save(path)
             cmd = [cfg.multiroom.python_bin, "-m", "tools.hub_messenger"]
             if is_v:
+                cmd.append("--ptt")
                 cmd.append(path)
             else:
                 cmd.append(m.content.strip())
