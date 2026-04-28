@@ -38,7 +38,7 @@ def _process_response(data: Dict[str, Any] | None, raw_content: str) -> Dict[str
 
 
 def _process_llm_result(response):
-    logger.info(response)
+    logger.debug(response)
     content = response.message.content.strip()
     data = _extract_json_from_content(content)
     return _process_response(data, content)

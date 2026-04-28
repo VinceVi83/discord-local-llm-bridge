@@ -46,9 +46,43 @@ class DiscordBot(discord.Client):
             logger.info(f"Error sending startup message: {e}")
         logger.info(f"{self.user} connected.")
 
+    async def clean_current_channel(self, m):
+        try:
+            old_ch = m.channel
+            settings = {
+                "name": old_ch.name,
+                "topic": old_ch.topic,
+                "position": old_ch.position,
+                "nsfw": old_ch.nsfw,
+                "slowmode_delay": old_ch.slowmode_delay,
+                "category": old_ch.category,
+                "overwrites": old_ch.overwrites
+            }
+
+            new_ch = await old_ch.clone(reason="Channel Clean & Parameter Migration")
+            await new_ch.edit(
+                topic=settings["topic"],
+                position=settings["position"],
+                nsfw=settings["nsfw"],
+                slowmode_delay=settings["slowmode_delay"]
+            )
+
+            await old_ch.delete()
+            logger.info(f"Channel cleaned: '{settings['name']}'. Parameters successfully migrated from {old_ch.id} to {new_ch.id}.")
+            return
+            
+        except Exception as e:
+            logger.error(f"Error during channel clean/migration for {m.channel.id}: {e}")
+            return
+            
     async def on_message(self, m):
         if m.author == self.user:
             return
+
+        if m.content == "!archive_clean" and m.author.guild_permissions.manage_channels:
+            await self.clean_current_channel(m)
+            return
+
         if m.channel.name == cfg.bot.channels.multiroom:
             await self.handle_multiroom(m)
         elif m.channel.name.startswith(cfg.bot.channels.os_prefix):
