@@ -95,7 +95,7 @@ class CfgConfig(SimpleNamespace):
 
 class DiscordBridgeConfig:
     def __init__(self):
-        self.BASE_DIR = Path.home() / "Documents" / "DiscordBridge"
+        self.BASE_DIR = Path.home() / "Documents" / "discord-local-llm-bridge"
         self.CONFIG_FILE = self.BASE_DIR / "config.yaml"
         self.AGENTS_DIR = self.BASE_DIR / "agents"
         self._setup_files()
