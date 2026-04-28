@@ -1,0 +1,29 @@
+bot:
+  token: "YOUR_DISCORD_TOKEN_HERE"
+  status: "online"
+  activity: "Alisu Bridge"
+  channels:
+    notify: "notify-me"
+    multiroom: "multiroom"
+    os_prefix: "os-"
+
+system:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "info"
+  purge_on_start: true
+
+ollama:
+  host: "http://localhost:11434"
+  default_model: "qwen2.5:7b"
+  fallback_model: "llama3"
+  timeout: 90
+  agents_dir: "./agents"
+  options:
+    temperature: 0.7
+    num_ctx: 4096
+    top_p: 0.9
+
+multiroom:
+  python_bin: "/home/user/PYTHON_PROJECT_ENV/bin/python"
+  working_dir: "/home/user/Project/MultiRoom/"
