@@ -43,6 +43,7 @@ def _process_llm_result(response):
     data = _extract_json_from_content(content)
     return _process_response(data, content)
 
+
 class OllamaServiceAsync:
     """Async Ollama Service for LLM interactions
     

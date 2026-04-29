@@ -98,6 +98,7 @@ class DiscordBridgeConfig:
         self.BASE_DIR = Path.home() / "Documents" / "discord-local-llm-bridge"
         self.CONFIG_FILE = self.BASE_DIR / "config.yaml"
         self.AGENTS_DIR = self.BASE_DIR / "agents"
+        self.AGENTS_DIR_COMMON = Path(__file__).parent / "agents"
         self._setup_files()
         self.cfg = self._dict_to_namespace(self._load_yaml())
         self.cfg.agents = self._load_agents()
@@ -121,11 +122,15 @@ class DiscordBridgeConfig:
 
     def _load_agents(self):
         agents = CfgConfig()
-        for md_file in self.AGENTS_DIR.glob("*.md"):
+        self._load_markdown_agents(self.AGENTS_DIR, agents)
+        self._load_markdown_agents(self.AGENTS_DIR_COMMON, agents)
+        return agents
+
+    def _load_markdown_agents(self, agents_dir, agents):
+        for md_file in agents_dir.glob("*.md"):
             with open(md_file, "r", encoding='utf-8') as f:
                 content = f.read().strip()
                 setattr(agents, md_file.stem, content)
-        return agents
 
     def _dict_to_namespace(self, data):
         if isinstance(data, dict):
@@ -141,18 +146,5 @@ class DiscordBridgeConfig:
                 converted_list.append(converted_item)
             return converted_list
         return data
-    
-    def agent(self):
-        if not self.AGENTS_DIR.exists():
-            return
-
-        for md_file in self.AGENTS_DIR.glob("*.md"):
-            name = md_file.stem 
-            with open(md_file, "r", encoding='utf-8') as f:
-                content = f.read().strip()
-                setattr(self.agents, name, content)
-        
-        agent_names = list(vars(self.agents).keys())
-        logger.info("Agents loaded: " + ", ".join(agent_names))
 
 cfg = DiscordBridgeConfig().cfg

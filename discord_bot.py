@@ -2,6 +2,8 @@ import discord, asyncio, threading, queue, traceback, os, subprocess, requests
 from config_loader import cfg
 from ollama_config import OllamaConfig
 from ollama_service import llm
+from pathlib import Path
+import importlib
 import logging
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,32 @@ class DiscordBot(discord.Client):
         super().__init__(*args, **kwargs)
         self.llm_queue = queue.Queue()
         self.worker_thread = None
+        self.plugin_name_list = []
+        self.load_plugins()
+
+    def load_plugins(self):
+        plugins_path = Path("plugins")
+        if not plugins_path.exists():
+            return
+
+        for plugin_dir in plugins_path.iterdir():
+            service_file = plugin_dir / "service.py"
+            if not plugin_dir.is_dir() or not service_file.exists():
+                continue
+            try:
+                module_path = f"plugins.{plugin_dir.name}.service"
+                module = importlib.import_module(module_path)
+
+                for item in dir(module):
+                    if item.startswith("handle_"):
+                        func = getattr(module, item)
+                        setattr(self, item, func.__get__(self, self.__class__))
+                        if plugin_dir.name not in self.plugin_name_list:
+                            self.plugin_name_list.append(plugin_dir.name)
+
+                        logger.info(f"Plugin loaded: {plugin_dir.name} -> {item}")
+            except Exception as e:
+                logger.error(f"Failed to load plugin {plugin_dir.name}: {e}")
 
     async def on_ready(self):
         logger.info(f"on_ready")
@@ -74,18 +102,40 @@ class DiscordBot(discord.Client):
         except Exception as e:
             logger.error(f"Error during channel clean/migration for {m.channel.id}: {e}")
             return
-            
-    async def on_message(self, m):
-        if m.author == self.user:
-            return
 
-        if m.content == "!archive_clean" and m.author.guild_permissions.manage_channels:
+    async def command_help(self, m):
+        await self.send_smart_split(
+            channel=m.channel,
+            reply_to_id=m.id,
+            text=cfg.agents.help
+        )
+
+    async def execute_command(self, m):
+        if m.content == '!archive_clean':
             await self.clean_current_channel(m)
+        elif m.content == '!restart':
+            await subprocess.Popen(["sudo", "/usr/local/bin/multiroom-restart"])
+        elif m.content == '!reboot':
+            await subprocess.Popen(["sudo", "reboot"])
+        else:
+            await self.command_help(m)
+
+    async def on_message(self, m):
+        if m.content.startswith('!'):
+            await self.execute_command(m)
             return
 
-        if m.channel.name == cfg.bot.channels.multiroom:
-            await self.handle_multiroom(m)
-        elif m.channel.name.startswith(cfg.bot.channels.os_prefix):
+        if m.author == self.user or m.channel.name == 'notify-me':
+            return
+
+        for plugin_name in self.plugin_name_list:
+            if m.channel.name.startswith(plugin_name):
+                method_name = f"handle_{plugin_name}"
+                if hasattr(self, method_name):
+                    await getattr(self, method_name)(m)
+                    return
+
+        if m.channel.name.startswith(cfg.bot.channels.os_prefix):
             await self.handle_channel_no_memory(m)
         else:
             await self.handle_channel(m)

@@ -1,0 +1,3 @@
+multiroom:
+  python_bin: "/home/user/PYTHON_PROJECT_ENV/bin/python"
+  working_dir: "/home/user/Project/MultiRoom/"

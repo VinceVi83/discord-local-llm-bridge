@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_channel_by_name(bot, channel_name):
-    """Get a channel by name from the bot's channels."""
     channel = discord.utils.get(bot.get_all_channels(), name=channel_name)
     if not channel:
         logger.info(f"Channel '{channel_name}' not found.")
@@ -25,7 +24,6 @@ def get_channel_by_name(bot, channel_name):
 
 
 def check_send_permissions(channel):
-    """Check if the bot has permission to send messages in the channel."""
     permissions = channel.permissions_for(channel.guild.me)
     if not permissions.send_messages:
         return False
@@ -33,7 +31,6 @@ def check_send_permissions(channel):
 
 
 def handle_attachments(notif_attachments):
-    """Process attachments and return discord files and opened file handles."""
     discord_files = []
     opened_files = []
 
@@ -50,7 +47,6 @@ def handle_attachments(notif_attachments):
 
 
 def close_file_handles(opened_files):
-    """Close all opened file handles."""
     for f in opened_files:
         f.close()
 
@@ -105,9 +101,9 @@ async def send_notification(notif: Notification):
 
     try:
         await bot.send_smart_split(
-            channel=channel, 
-            text=notif.msg, 
-            reply_to_id=notif.reply_to, 
+            channel=channel,
+            text=notif.msg,
+            reply_to_id=notif.reply_to,
             files=discord_files
         )
         

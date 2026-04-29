@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OPTIONS = {
     'temperature': 0,
-    "keep_alive": 0,
+    'keep_alive': 0,
     'num_predict': 1000,
     'num_ctx': 16384,
     'think': False
