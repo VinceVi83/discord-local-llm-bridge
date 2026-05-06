@@ -38,7 +38,14 @@ class DiscordJanitor(commands.Cog):
             logger.error(f"Janitor Error: {e}")
 
     async def process_channel(self, channel):
-        last_message = await self._get_last_message(channel)
+        last_message = None
+        async for message in channel.history(limit=5):
+            if message.author != self.bot.user:
+                last_message = message
+                break
+        
+        if not last_message:
+            last_message = await self._get_last_message(channel)
 
         if not last_message:
             return
