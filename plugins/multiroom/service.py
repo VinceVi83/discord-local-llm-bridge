@@ -16,6 +16,7 @@ async def handle_multiroom(self, m):
                 is_v = True
                 break
 
+        path = None
         if is_v:
             path = f"/tmp/{m.id}.ogg"
             await m.attachments[0].save(path)

@@ -122,21 +122,27 @@ class OllamaService:
         
         if self.wan_available and self.client_wan:
             client = self.client_wan
-            target_model = getattr(cfg.ollama, 'default_model_wan', payload['model'])
+            if not payload['model']:
+                target_model = getattr(cfg.ollama, 'default_model_wan', payload['model'])
+                config_obj.model = target_model
             network_type = "WAN"
         else:
             client = self.client_local
-            target_model = getattr(cfg.ollama, 'default_model_lan', payload['model'])
+            if not payload['model']:
+                target_model = getattr(cfg.ollama, 'default_model_lan', payload['model'])
+                config_obj.model = target_model
             network_type = "LAN"
 
         try:
-            logger.info(f"🚀 Dispatching to {network_type} | Model: {config_obj.model}")
+            logger.info(f"Dispatching to {network_type} | Model: {config_obj.model}")
             resp = client.chat(**config_obj.get_payload())
             return _process_llm_result(resp)
         
         except Exception as e:
-            logger.error(f"❌ {network_type} Failed: {e}")
+            logger.error(f"{network_type} Failed: {e}")
             if client == self.client_wan:
+                target_model = getattr(cfg.ollama, 'fallback_model_wan', payload['model'])
+                config_obj.model = target_model
                 resp = client.chat(**config_obj.get_payload())
                 return _process_llm_result(resp)
             raise e

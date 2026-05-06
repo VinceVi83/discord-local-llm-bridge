@@ -66,13 +66,7 @@ class Notification(BaseModel):
 
 
 app = FastAPI(title="A.L.I.S.U API Server")
-
-intents = discord.Intents.default()
-intents.guilds = True
-intents.message_content = True
-intents.messages = True
-
-bot = DiscordBot(intents=intents)
+bot = DiscordBot()
 
 
 @app.get("/status")

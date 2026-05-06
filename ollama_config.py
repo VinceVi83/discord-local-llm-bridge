@@ -74,7 +74,7 @@ class OllamaConfig:
         get_payload(self) : Generate the final Ollama API request payload.
     """
     def __init__(self, system_prompt: str = None, profile: str = 'default', soul: str = None, content: str = ''):
-        self.model = 'batiai/qwen3.5-9b'
+        self.model = ''
         self.system_prompt = ''
         self.personality = ''
         self.user_content = content

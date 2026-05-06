@@ -1,13 +1,15 @@
 import discord, asyncio, threading, queue, traceback, os, subprocess, requests
+from discord.ext import commands
 from config_loader import cfg
 from ollama_config import OllamaConfig
 from ollama_service import llm
+from discord_janitor import DiscordJanitor
 from pathlib import Path
 import importlib
 import logging
 logger = logging.getLogger(__name__)
 
-class DiscordBot(discord.Client):
+class DiscordBot(commands.Bot):
     """Discord Bot for AI-powered chat interactions
     
     Role: Manages Discord bot operations, LLM integration, and multiroom messaging.
@@ -20,14 +22,19 @@ class DiscordBot(discord.Client):
         handle_channel_no_memory(self, m) : Alias for handle_channel.
         llm_worker(self, loop) : Worker thread for LLM request processing.
         get_config_from_topic(self, topic) : Parse topic string into OllamaConfig.
-        handle_multiroom(self, m) : Handle multiroom message forwarding.
         send_smart_split(self, channel, text, limit, reply_to_id, files) : Split and send large messages.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        intents = discord.Intents.default()
+        intents.guilds = True
+        intents.messages = True
+        intents.message_content = True 
+        
+        super().__init__(command_prefix="!", intents=intents, *args, **kwargs)
         self.llm_queue = queue.Queue()
         self.worker_thread = None
         self.plugin_name_list = []
+        self.janitor = None
         self.load_plugins()
 
     def load_plugins(self):
@@ -55,28 +62,33 @@ class DiscordBot(discord.Client):
                 logger.error(f"Failed to load plugin {plugin_dir.name}: {e}")
 
     async def on_ready(self):
-        logger.info(f"on_ready")
+        logger.info(f"Logged in as {self.user}")
+        if not self.get_cog("DiscordJanitor"):
+            try:
+                await self.add_cog(DiscordJanitor(self))
+                logger.info("DiscordJanitor Cog loaded successfully.")
+            except Exception as e:
+                logger.error(f"Could not load DiscordJanitor: {e}")
+        
         if not self.worker_thread:
             loop = asyncio.get_running_loop()
             self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
             self.worker_thread.start()
 
         try:
-            channel_name = cfg.bot.channels.notify
+            channel_name = cfg.bot.notification
             channel = discord.utils.get(self.get_all_channels(), name=channel_name)
-            
             if channel:
                 await channel.send(f"**A.L.I.S.U : System restarted**\nNotification server is back online.")
             else:
                 logger.info(f"Unable to send notification: channel '{channel_name}' not found.")
-                
         except Exception as e:
             logger.info(f"Error sending startup message: {e}")
         logger.info(f"{self.user} connected.")
 
-    async def clean_current_channel(self, m):
+    async def clean_channel(self, channel):
         try:
-            old_ch = m.channel
+            old_ch = channel
             settings = {
                 "name": old_ch.name,
                 "topic": old_ch.topic,
@@ -98,9 +110,8 @@ class DiscordBot(discord.Client):
             await old_ch.delete()
             logger.info(f"Channel cleaned: '{settings['name']}'. Parameters successfully migrated from {old_ch.id} to {new_ch.id}.")
             return
-            
         except Exception as e:
-            logger.error(f"Error during channel clean/migration for {m.channel.id}: {e}")
+            logger.error(f"Error during channel clean/migration for {channel.id}: {e}")
             return
 
     async def command_help(self, m):
@@ -112,7 +123,7 @@ class DiscordBot(discord.Client):
 
     async def execute_command(self, m):
         if m.content == '!archive_clean':
-            await self.clean_current_channel(m)
+            await self.clean_channel(m.channel)
         elif m.content == '!restart':
             await subprocess.Popen(["sudo", "/usr/local/bin/multiroom-restart"])
         elif m.content == '!reboot':
@@ -125,7 +136,8 @@ class DiscordBot(discord.Client):
             await self.execute_command(m)
             return
 
-        if m.author == self.user or m.channel.name == 'notify-me':
+        ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
+        if m.author == self.user or m.channel.name.startswith(ignore_prefixes):
             return
 
         for plugin_name in self.plugin_name_list:
@@ -168,13 +180,13 @@ class DiscordBot(discord.Client):
                 conf = self.get_config_from_topic(task['topic'])
                 conf.set_content(task['content'])
                 res = llm.generate(conf).get('content', "")
-                
+
                 if not res:
-                    conf.model = 'qwen2.5:7b'
+                    conf.model = 'qwen2.5:3b'
                     res = llm.generate(conf).get('content', "Erreur de génération")
 
                 loop.call_soon_threadsafe(task['done_event'].set)
-                
+
                 payload = {
                     "channel_name": task['channel_name'],
                     "msg": f"<@!{task['author_id']}> {res}",
@@ -223,24 +235,6 @@ class DiscordBot(discord.Client):
                 config.options[key] = value
 
         return config
-
-    async def handle_multiroom(self, m):
-        try:
-            is_v = any(a.filename.endswith('.ogg') for a in m.attachments)
-            path = f"/tmp/{m.id}.ogg"
-            if is_v:
-                await m.attachments[0].save(path)
-            cmd = [cfg.multiroom.python_bin, "-m", "tools.hub_messenger"]
-            if is_v:
-                cmd.append("--ptt")
-                cmd.append(path)
-            else:
-                cmd.append(m.content.strip())
-            subprocess.Popen(cmd, cwd=cfg.multiroom.working_dir)
-            await m.add_reaction("✅")
-        except Exception as e:
-            logger.info(f'handle_multiroom {e}')
-            await m.add_reaction("❌")
 
     async def send_smart_split(self, channel, text, limit=1900, reply_to_id=None, files=None):
         target = None
