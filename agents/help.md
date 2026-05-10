@@ -7,7 +7,7 @@ To customize the LLM's behavior in this channel, modify the **Channel Topic**. T
 
 ---
 
-## ⚙️ Technical Settings (Before the `---`)
+## Technical Settings (Before the `---`)
 You can combine multiple options using the `|` separator:
 
 * **model**: The Ollama model name (e.g., `batiai/qwen3.5-9b`).

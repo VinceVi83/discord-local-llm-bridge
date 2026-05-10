@@ -1,4 +1,5 @@
 import discord, asyncio, threading, queue, traceback, os, subprocess, requests
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from config_loader import cfg
 from ollama_config import OllamaConfig
@@ -22,20 +23,23 @@ class DiscordBot(commands.Bot):
         handle_channel_no_memory(self, m) : Alias for handle_channel.
         llm_worker(self, loop) : Worker thread for LLM request processing.
         get_config_from_topic(self, topic) : Parse topic string into OllamaConfig.
-        send_smart_split(self, channel, text, limit, reply_to_id, files) : Split and send large messages.
+        send_smart_split(self, channel, text, limit, files) : Split and send large messages.
     """
     def __init__(self, *args, **kwargs):
         intents = discord.Intents.default()
         intents.guilds = True
         intents.messages = True
-        intents.message_content = True 
+        intents.message_content = True
         
         super().__init__(command_prefix="!", intents=intents, *args, **kwargs)
+        self.initialized = False
         self.llm_queue = queue.Queue()
         self.worker_thread = None
-        self.plugin_name_list = []
+        self.pending_autostarts = []
         self.janitor = None
-        self.load_plugins()
+
+        self.scheduler = AsyncIOScheduler()
+        self.plugin_name_list = []
 
     def load_plugins(self):
         plugins_path = Path("plugins")
@@ -51,29 +55,64 @@ class DiscordBot(commands.Bot):
                 module = importlib.import_module(module_path)
 
                 for item in dir(module):
+                    func = getattr(module, item)
                     if item.startswith("handle_"):
-                        func = getattr(module, item)
                         setattr(self, item, func.__get__(self, self.__class__))
                         if plugin_dir.name not in self.plugin_name_list:
                             self.plugin_name_list.append(plugin_dir.name)
-
                         logger.info(f"Plugin loaded: {plugin_dir.name} -> {item}")
+
+                    elif item.startswith("task_") and hasattr(func, "schedule_config"):
+                        config = func.schedule_config
+                        bound_func = func.__get__(self, self.__class__)
+                        async def task_wrapper(f=bound_func):
+                            await asyncio.to_thread(f)
+                            
+                        scheduler_config = {k: v for k, v in config.items() if k != "autostart"}
+                        self.scheduler.add_job(task_wrapper, **scheduler_config)
+                        logger.info(f"Task scheduled (Threaded): {plugin_dir.name} -> {item}")
+
+                        if config.get("autostart", False):
+                            self.pending_autostarts.append(bound_func)
+                            logger.info(f"Task queued for autostart: {plugin_dir.name}")
+
             except Exception as e:
                 logger.error(f"Failed to load plugin {plugin_dir.name}: {e}")
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user}")
-        if not self.get_cog("DiscordJanitor"):
-            try:
-                await self.add_cog(DiscordJanitor(self))
-                logger.info("DiscordJanitor Cog loaded successfully.")
-            except Exception as e:
-                logger.error(f"Could not load DiscordJanitor: {e}")
-        
-        if not self.worker_thread:
+        if not self.initialized:
+            self.load_plugins()
+            if not self.get_cog("DiscordJanitor"):
+                try:
+                    await self.add_cog(DiscordJanitor(self))
+                    logger.info("DiscordJanitor Cog loaded successfully.")
+                except Exception as e:
+                    logger.error(f"Could not load DiscordJanitor: {e}")
+
             loop = asyncio.get_running_loop()
-            self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
-            self.worker_thread.start()
+            if not self.worker_thread:
+                loop = asyncio.get_running_loop()
+                self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
+                self.worker_thread.start()
+                logger.info("LLM Worker thread started.")
+
+            if not self.worker_thread:
+                self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
+                self.worker_thread.start()
+
+            if not self.scheduler.running:
+                self.scheduler._eventloop = loop 
+                self.scheduler.start()
+
+            for func in self.pending_autostarts:
+                logger.info(f"Lancement autostart: {func.__name__}")
+                asyncio.create_task(asyncio.to_thread(func))
+            
+            self.pending_autostarts.clear()
+            self.initialized = True
+        else:
+            logger.info("Reconnection detected, skipping initialization.")
 
         try:
             channel_name = cfg.bot.notification
@@ -117,7 +156,6 @@ class DiscordBot(commands.Bot):
     async def command_help(self, m):
         await self.send_smart_split(
             channel=m.channel,
-            reply_to_id=m.id,
             text=cfg.agents.help
         )
 
@@ -136,8 +174,7 @@ class DiscordBot(commands.Bot):
             await self.execute_command(m)
             return
 
-        ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
-        if m.author == self.user or m.channel.name.startswith(ignore_prefixes):
+        if m.author == self.user:
             return
 
         for plugin_name in self.plugin_name_list:
@@ -146,6 +183,10 @@ class DiscordBot(commands.Bot):
                 if hasattr(self, method_name):
                     await getattr(self, method_name)(m)
                     return
+
+        ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
+        if m.channel.name.startswith(ignore_prefixes):
+            return
 
         if m.channel.name.startswith(cfg.bot.channels.os_prefix):
             await self.handle_channel_no_memory(m)
@@ -236,45 +277,48 @@ class DiscordBot(commands.Bot):
 
         return config
 
-    async def send_smart_split(self, channel, text, limit=1900, reply_to_id=None, files=None):
-        target = None
-        if reply_to_id:
-            try:
-                target = await channel.fetch_message(reply_to_id)
-            except:
-                pass
-
+    async def send_smart_split(self, channel, text, limit=1900, files=None):
         in_code = False
         lang = ""
-        while text:
-            if len(text) <= limit:
-                chunk, text = text, ""
+        remaining_text = text if text else ""
+        chunks = []
+        while remaining_text:
+            if len(remaining_text) <= limit:
+                chunk, remaining_text = remaining_text, ""
             else:
-                cut = text.rfind('\n\n', 0, limit)
-                if cut < limit * 0.5:
-                    cut = text.rfind('\n', 0, limit)
-                if cut < limit * 0.5:
-                    cut = text.rfind(' ', 0, limit)
+                cut = remaining_text.rfind('\n\n', 0, limit)
+                if cut < limit * 0.5: cut = remaining_text.rfind('\n', 0, limit)
+                if cut < limit * 0.5: cut = remaining_text.rfind(' ', 0, limit)
                 cut = cut if cut != -1 else limit
-                chunk, text = text[:cut], text[cut:].lstrip()
+                chunk, remaining_text = remaining_text[:cut], remaining_text[cut:].lstrip()
 
             ticks = chunk.count('```')
             if in_code:
-                if ticks % 2 != 0:
-                    in_code = False
+                if ticks % 2 != 0: in_code = False
                 else:
                     chunk += "\n```"
-                    text = f"```{lang}\n" + text
+                    remaining_text = f"```{lang}\n" + remaining_text
             elif ticks % 2 != 0:
                 in_code = True
                 last = chunk.rfind('```')
                 nl = chunk.find('\n', last)
                 lang = chunk[last+3:nl].strip() if nl != -1 else ""
                 chunk += "\n```"
-                text = f"```{lang}\n" + text
+                remaining_text = f"```{lang}\n" + remaining_text
+            
+            chunks.append(chunk)
 
-            if target:
-                await target.reply(content=chunk, files=files or [])
-                target, files = None, None
+            discord_files = files if files else []
+
+        if not chunks:
+            if discord_files:
+                await channel.send(files=discord_files)
+            return
+
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            
+            if is_last and discord_files:
+                await channel.send(content=chunk, files=discord_files)
             else:
                 await channel.send(content=chunk)
