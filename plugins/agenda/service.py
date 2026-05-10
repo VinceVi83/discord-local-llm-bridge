@@ -17,6 +17,16 @@ calendar_plugin = CalendarService()
 
 LOCK_PATH = Path("/tmp/agenda_notification.lock")
 
+def scheduled(autostart=False, **config):
+    def decorator(func):
+        config["autostart"] = autostart
+        func.schedule_config = config
+        return func
+    return decorator
+
+async def handle_agenda(self, m):
+    await asyncio.to_thread(manage_request, self, m)
+
 def get_event_hash(summary):
     return hashlib.md5(summary.encode('utf-8')).hexdigest()
 
@@ -111,7 +121,7 @@ def generate_ics_from_template(output_path, name_event, date, location):
 
 def _execute_save(bot, m):
     system_prompt_event = cfg.agents.agenda_extract_event_name
-    if 'concert' in m.content.lower():
+    if 'concert' in m.content.lower() or m.attachments:
         system_prompt_event = cfg.agents.agenda_extract_artist
         path = Path(cfg.agenda.path_concert) / "concerts.json"
         index = {}
@@ -131,6 +141,7 @@ def _execute_save(bot, m):
     resp_date = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_extract_date, m.content)
     date = resp_date.get("date")
 
+    logger.debug(f"_execute_save extract data : {event} | {venue} | {date} ")
     already_exists = any(
         item.get("data", {}).get("event", "").lower() == event.lower() or
         item.get("data", {}).get("date") == date
@@ -140,36 +151,28 @@ def _execute_save(bot, m):
     if already_exists:
         return f"**{event}** or this date is already in the calendar."
 
-    if 'concert' in m.content.lower():
-        filename = None
-        if m.attachments:
-            attachment = m.attachments[0]
-            filename = attachment.filename
-            save_dir = Path(cfg.agenda.path_concert)
-            save_dir.mkdir(parents=True, exist_ok=True)
-            r = requests.get(attachment.url)
-            with open(save_dir / filename, 'wb') as f:
-                f.write(r.content)
+    if m.attachments:
+        attachment = m.attachments[0]
+        filename = attachment.filename
+        save_dir = Path(cfg.agenda.path_concert)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        r = requests.get(attachment.url)
+        with open(save_dir / filename, 'wb') as f:
+            f.write(r.content)
 
-                path = Path(cfg.agenda.path_concert) / "concerts.json"
-            index = {}
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    index = json.load(f)
+        index[filename] = {
+            "status": "ics_pending",
+            "data": {
+                "artist": event,
+                "venue": venue,
+                "date": date
+            },
+            "event": None
+        }
 
-            index[filename] = {
-                "status": "ics_pending",
-                "data": {
-                    "artist": event,
-                    "venue": venue,
-                    "date": date
-                },
-                "event": None
-            }
-
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(index, f, indent=4, ensure_ascii=False)
-            event = 'Concert : ' + event
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=4, ensure_ascii=False)
+        event = 'Concert : ' + event
 
     ics_path = Path(cfg.agenda.path_concert) / f"{event}.ics"
     try:
@@ -299,10 +302,3 @@ def task_sync_daily_alarm(bot):
     except Exception as e:
         logger.error(f"ERROR : {e}\n{traceback.format_exc()}")
         bot.scheduler.add_job(task_sync_daily_alarm, 'date', run_date=datetime.now() + timedelta(minutes=30), args=[bot])
-
-def scheduled(autostart=False, **config):
-    def decorator(func):
-        config["autostart"] = autostart
-        func.schedule_config = config
-        return func
-    return decorator
