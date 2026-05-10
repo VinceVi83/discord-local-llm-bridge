@@ -41,7 +41,7 @@ def handle_attachments(attachments):
     for path_str in attachments:
         path = Path(path_str)
         if not path.exists():
-            logger.error(f"Fichier introuvable : {path_str}")
+            logger.error(f"File not found: {path_str}")
             continue
             
         try:
@@ -49,7 +49,7 @@ def handle_attachments(attachments):
             opened_files.append(f)
             discord_files.append(discord.File(f, filename=path.name))
         except Exception as e:
-            logger.error(f"Impossible d'ouvrir le fichier {path_str}: {e}")
+            logger.error(f"Cannot open file {path_str}: {e}")
             
     return discord_files, opened_files
 
@@ -95,11 +95,8 @@ async def send_notification(notif: Notification):
     if not channel:
         logger.error(f"Could not find channel {notif.channel_id}")
         return
-    try:
-        discord_files, opened_files = handle_attachments(notif.attachments)
-    except Exception as e:
-        logger.error(f"CRASH dans handle_attachments: {e}")
-        return
+    
+    discord_files, opened_files = handle_attachments(notif.attachments)
     
     logger.info(f"Sending notification to {channel.name} with {len(discord_files)} files")
 
@@ -112,11 +109,7 @@ async def send_notification(notif: Notification):
     except Exception as e:
         logger.error(f"Error in send_notification: {e}")
     finally:
-        for f in opened_files:
-            try:
-                f.close()
-            except Exception as e:
-                logger.error(f"Error closing file: {e}")
+        close_file_handles(opened_files)
 
 
 async def start_services():

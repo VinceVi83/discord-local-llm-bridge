@@ -1,4 +1,3 @@
-
 import os
 import json
 from pathlib import Path
@@ -13,6 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 class Utils:
+    """Utility Service Plugin
+    
+    Role: Provides helper functions for LLM calls, file path management, data formatting, and notifications.
+    
+    Methods:
+        llm_call(model, system_prompt, user_message) : Make LLM call with Ollama.
+        get_unique_path(dir_path, base_name, extension=".wav") : Generate unique file path to avoid collisions.
+        format_result(result) : Format result data (dict or other types) to string.
+        to_int(data, key) : Convert data value to integer.
+        to_str(data, key) : Convert data value to string.
+        send_discord_notification(message, channel=None, files=None) : Send Discord notification.
+    """
     @staticmethod
     def llm_call(model, system_prompt, user_message):
         conf = OllamaConfig()
@@ -51,13 +62,13 @@ class Utils:
 
     @staticmethod
     def to_int(data, key):
-        try:
-            val = data.get(key)
-            if val is not None:
+        val = data.get(key)
+        if val is not None:
+            try:
                 return int(val)
-            return -1
-        except (ValueError, TypeError):
-            return -1
+            except (ValueError, TypeError):
+                return -1
+        return -1
     
     @staticmethod
     def to_str(data, key):
@@ -73,10 +84,12 @@ class Utils:
     def send_discord_notification(message, channel=None, files=None):
         def post_request():
             try:
+                channel_name = channel if channel else 'notify.me'
+                attachment_list = files if files else []
                 payload = {
-                    "channel_name": channel if channel else 'notify.me',
+                    "channel_name": channel_name,
                     "msg": message,
-                    "attachments": files if files else []
+                    "attachments": attachment_list
                 }
                 logger.info(f"send_discord_notification. {payload}")
                 requests.post(f"http://127.0.0.1:8000/send",

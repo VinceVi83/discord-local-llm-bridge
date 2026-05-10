@@ -9,6 +9,7 @@ from config_loader import cfg
 import logging
 logger = logging.getLogger(__name__)
 
+
 class CalendarService:
     """Calendar Service Plugin
     
@@ -101,6 +102,7 @@ class CalendarService:
     def _filter_events(self, events, keyword, month):
         filtered = []
         now = datetime.now()
+
         for event in events:
             if event["dt"] < now:
                 continue
@@ -109,6 +111,7 @@ class CalendarService:
             if month and event["dt"].strftime("%m") != month.zfill(2):
                 continue
             filtered.append(event)
+
         return filtered
 
     def fetch_calendar_events(self, keyword="", month="", limit=None):
@@ -136,6 +139,7 @@ class CalendarService:
         events = self.fetch_calendar_events(keyword="Concert")
         if not events:
             return None
+
         with open(self.index_path, "r", encoding="utf-8") as f:
             index = json.load(f)
 
@@ -163,6 +167,7 @@ class CalendarService:
                     "pdf": best_pdf,
                     "raw_key": event_key
                 }
+
         return None
 
     def _get_week_boundaries(self, offset=0):
@@ -177,10 +182,11 @@ class CalendarService:
         all_events = self._get_calendar_events()
         start_of_target_week, end_of_target_week = self._get_week_boundaries(offset)
 
-        filtered = [
-            e for e in all_events
-            if start_of_target_week <= e["dt"] <= end_of_target_week
-        ]
+        filtered = []
+        for e in all_events:
+            if start_of_target_week <= e["dt"] <= end_of_target_week:
+                filtered.append(e)
+
         return filtered
 
 if __name__ == "__main__":

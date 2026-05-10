@@ -17,10 +17,14 @@ class DiscordBot(commands.Bot):
     
     Methods:
         __init__(self, *args, **kwargs) : Initialize the Discord bot client.
+        load_plugins(self) : Load and register plugin handlers and scheduled tasks.
         on_ready(self) : Handle bot startup and send notification.
+        clean_channel(self, channel) : Clone and clean a channel, migrating settings.
+        command_help(self, m) : Send help text to the message channel.
+        execute_command(self, m) : Execute bot commands like !archive_clean, !restart, !reboot.
         on_message(self, m) : Handle incoming messages from users.
-        handle_channel(self, m) : Process messages in configured channels.
-        handle_channel_no_memory(self, m) : Alias for handle_channel.
+        handle_channel(self, m) : Process messages in configured channels with memory.
+        handle_channel_no_memory(self, m) : Alias for handle_channel without memory.
         llm_worker(self, loop) : Worker thread for LLM request processing.
         get_config_from_topic(self, topic) : Parse topic string into OllamaConfig.
         send_smart_split(self, channel, text, limit, files) : Split and send large messages.
@@ -92,21 +96,16 @@ class DiscordBot(commands.Bot):
 
             loop = asyncio.get_running_loop()
             if not self.worker_thread:
-                loop = asyncio.get_running_loop()
                 self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
                 self.worker_thread.start()
                 logger.info("LLM Worker thread started.")
-
-            if not self.worker_thread:
-                self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
-                self.worker_thread.start()
 
             if not self.scheduler.running:
                 self.scheduler._eventloop = loop 
                 self.scheduler.start()
 
             for func in self.pending_autostarts:
-                logger.info(f"Lancement autostart: {func.__name__}")
+                logger.info(f"Autostart launch: {func.__name__}")
                 asyncio.create_task(asyncio.to_thread(func))
             
             self.pending_autostarts.clear()
@@ -224,7 +223,7 @@ class DiscordBot(commands.Bot):
 
                 if not res:
                     conf.model = 'qwen2.5:3b'
-                    res = llm.generate(conf).get('content', "Erreur de génération")
+                    res = llm.generate(conf).get('content', "Generation error")
 
                 loop.call_soon_threadsafe(task['done_event'].set)
 
@@ -282,19 +281,23 @@ class DiscordBot(commands.Bot):
         lang = ""
         remaining_text = text if text else ""
         chunks = []
+
         while remaining_text:
             if len(remaining_text) <= limit:
                 chunk, remaining_text = remaining_text, ""
             else:
                 cut = remaining_text.rfind('\n\n', 0, limit)
-                if cut < limit * 0.5: cut = remaining_text.rfind('\n', 0, limit)
-                if cut < limit * 0.5: cut = remaining_text.rfind(' ', 0, limit)
+                if cut < limit * 0.5:
+                    cut = remaining_text.rfind('\n', 0, limit)
+                if cut < limit * 0.5:
+                    cut = remaining_text.rfind(' ', 0, limit)
                 cut = cut if cut != -1 else limit
                 chunk, remaining_text = remaining_text[:cut], remaining_text[cut:].lstrip()
 
             ticks = chunk.count('```')
             if in_code:
-                if ticks % 2 != 0: in_code = False
+                if ticks % 2 != 0:
+                    in_code = False
                 else:
                     chunk += "\n```"
                     remaining_text = f"```{lang}\n" + remaining_text
