@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
+
 class LocalFilesFilter(logging.Filter):
-    """Filters logs to only show messages from your own project files."""
+    
     def __init__(self):
         super().__init__()
         self.local_files = set()
@@ -24,6 +25,7 @@ class LocalFilesFilter(logging.Filter):
 
     def filter(self, record):
         return record.filename in self.local_files
+
 
 def setup_logging():
     log_dir = cfg.config_dir
@@ -59,15 +61,14 @@ def setup_logging():
 
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
 
+
 class CfgConfig(SimpleNamespace):
-    """
-    Enhanced Namespace for dot notation access (cfg.bot.token) 
-    with formatted display and dictionary conversion.
-    """
+
     def __repr__(self):
         return self._format_object(self)
 
     def _format_object(self, obj, indent_level=0):
+
         spacing = "  " * indent_level
         if isinstance(obj, (SimpleNamespace, CfgConfig)):
             items = vars(obj).items()
@@ -85,6 +86,7 @@ class CfgConfig(SimpleNamespace):
         return str(obj)
 
     def to_dict(self):
+
         result = {}
         for k, v in vars(self).items():
             if isinstance(v, CfgConfig):
@@ -93,7 +95,9 @@ class CfgConfig(SimpleNamespace):
                 result[k] = v
         return result
 
+
 class DiscordBridgeConfig:
+    
     def __init__(self):
         self.BASE_DIR = Path.home() / "Documents" / "discord-local-llm-bridge"
         self.CONFIG_FILE = self.BASE_DIR / "config.yaml"
@@ -146,5 +150,6 @@ class DiscordBridgeConfig:
                 converted_list.append(converted_item)
             return converted_list
         return data
+
 
 cfg = DiscordBridgeConfig().cfg

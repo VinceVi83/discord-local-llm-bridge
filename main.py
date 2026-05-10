@@ -1,5 +1,6 @@
 import asyncio
 import uvicorn
+from pathlib import Path
 import discord
 import os
 import traceback
@@ -30,19 +31,26 @@ def check_send_permissions(channel):
     return True
 
 
-def handle_attachments(notif_attachments):
+def handle_attachments(attachments):
     discord_files = []
     opened_files = []
+    
+    if not attachments:
+        return [], []
 
-    if notif_attachments:
-        for path in notif_attachments:
-            if os.path.exists(path):
-                f = open(path, 'rb')
-                opened_files.append(f)
-                discord_files.append(discord.File(f, filename=os.path.basename(path)))
-            else:
-                logger.info(f"File not found: {path}")
-
+    for path_str in attachments:
+        path = Path(path_str)
+        if not path.exists():
+            logger.error(f"File not found: {path_str}")
+            continue
+            
+        try:
+            f = open(path, 'rb')
+            opened_files.append(f)
+            discord_files.append(discord.File(f, filename=path.name))
+        except Exception as e:
+            logger.error(f"Cannot open file {path_str}: {e}")
+            
     return discord_files, opened_files
 
 
@@ -84,25 +92,22 @@ async def send_notification(notif: Notification):
         return {"status": "error", "message": "Discord bot is not ready yet"}
 
     channel = get_channel_by_name(bot, notif.channel_name)
-    logger.info(f"send_notification channel: {channel}")
     if not channel:
-        return {"status": "error", "message": f"Channel '{notif.channel_name}' not found"}
-
-    if not check_send_permissions(channel):
-        return {"status": "error", "message": "Missing SEND_MESSAGES permission"}
-
+        logger.error(f"Could not find channel {notif.channel_id}")
+        return
+    
     discord_files, opened_files = handle_attachments(notif.attachments)
+    
+    logger.info(f"Sending notification to {channel.name} with {len(discord_files)} files")
 
     try:
         await bot.send_smart_split(
             channel=channel,
             text=notif.msg,
-            reply_to_id=notif.reply_to,
             files=discord_files
         )
-        
-        return {"status": "success"}
-
+    except Exception as e:
+        logger.error(f"Error in send_notification: {e}")
     finally:
         close_file_handles(opened_files)
 

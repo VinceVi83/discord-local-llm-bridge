@@ -15,8 +15,12 @@ class DiscordJanitor(commands.Cog):
     
     Methods:
         __init__(self, bot) : Initialize the cog with the bot instance.
-        janitor_loop(self) : Main cleanup loop that runs every 5 minutes to check and clean tmp channels.
+        cog_load(self) : Load the cog and start the janitor loop.
+        janitor_loop(self) : Main cleanup loop that runs every 10 minutes to check and clean tmp channels.
         process_channel(self, channel) : Process a single channel to determine if it should be cleaned.
+        _get_last_message(self, channel) : Get the last message from a channel's history.
+        _check_and_send_warning(self, channel) : Check if warning should be sent and send it if needed.
+        _check_already_warned(self, channel) : Check if a warning has already been sent to the channel.
         before_janitor(self) : Before loop hook to wait for bot ready state.
     """
     def __init__(self, bot):
@@ -38,14 +42,7 @@ class DiscordJanitor(commands.Cog):
             logger.error(f"Janitor Error: {e}")
 
     async def process_channel(self, channel):
-        last_message = None
-        async for message in channel.history(limit=5):
-            if message.author != self.bot.user:
-                last_message = message
-                break
-        
-        if not last_message:
-            last_message = await self._get_last_message(channel)
+        last_message = await self._get_last_message(channel)
 
         if not last_message:
             return
@@ -60,8 +57,10 @@ class DiscordJanitor(commands.Cog):
 
     async def _get_last_message(self, channel):
         last_message = None
-        async for message in channel.history(limit=1):
-            last_message = message
+        async for message in channel.history(limit=5):
+            if message.author != self.bot.user:
+                last_message = message
+                break
         return last_message
 
     async def _check_and_send_warning(self, channel):

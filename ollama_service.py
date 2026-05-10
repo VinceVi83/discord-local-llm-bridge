@@ -136,8 +136,8 @@ class OllamaService:
         try:
             logger.info(f"Dispatching to {network_type} | Model: {config_obj.model}")
             resp = client.chat(**config_obj.get_payload())
+            logger.debug(f"LLM Resp {resp}")
             return _process_llm_result(resp)
-        
         except Exception as e:
             logger.error(f"{network_type} Failed: {e}")
             if client == self.client_wan:

@@ -27,3 +27,7 @@ ollama:
 multiroom:
   python_bin: "/home/user/PYTHON_PROJECT_ENV/bin/python"
   working_dir: "/home/user/Project/MultiRoom/"
+
+agenda:
+    link_calendar: link_calendar
+    ics_template: plugins/agenda/template_concert.ics

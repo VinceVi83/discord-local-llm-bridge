@@ -64,10 +64,10 @@ class OllamaConfig:
     Role: Manages Ollama model configuration, system prompts, and request payloads.
     
     Methods:
-        __init__(self, system_prompt, profile='default', soul=None, content='') : Initialize configuration with model settings.
+        __init__(self, system_prompt=None, profile='default', soul=None, content='') : Initialize configuration with model settings.
         set_think(self, active=True) : Enable/disable thinking mode with adjusted prediction limits.
         set_profile(self, name) : Apply a predefined profile configuration.
-        set_system(self, prompt, profile=None, soul=None) : Set system prompt and profile.
+        set_system(self, prompt=None, profile=None, soul=None) : Set system prompt and profile.
         apply_agent_from_scope(self, analysis_res) : Apply agent configuration from analysis scope.
         _process_attachments(self, attachments) : Process and attach files to user content.
         set_content(self, text, attachments=None) : Set user content with optional attachments.
@@ -80,6 +80,7 @@ class OllamaConfig:
         self.user_content = content
         self.format = None
         self.options = DEFAULT_OPTIONS.copy()
+        self.images = []
         self.set_system(system_prompt, profile, soul)
 
     def set_think(self, active: bool = True):
@@ -122,9 +123,10 @@ class OllamaConfig:
                 data = path.read_text(encoding='utf-8')
                 attachment_header = f'\n\n--- ATTACHMENT: {path.name} ---\n'
                 attachment_footer = f'--- END OF FILE ---\n'
+                code_block = f'```\n{data}\n```\n'
                 self.user_content += (
                     attachment_header
-                    + f'```\n{data}\n```\n'
+                    + code_block
                     + attachment_footer
                 )
             except Exception:
@@ -132,7 +134,6 @@ class OllamaConfig:
 
     def set_content(self, text: str, attachments: list = None):
         self.user_content = text
-        self.images = []
         if attachments:
             self._process_attachments(attachments)
         return self
