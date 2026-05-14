@@ -121,7 +121,7 @@ def generate_ics_from_template(output_path, name_event, date, location):
 
 def _execute_save(bot, m):
     system_prompt_event = cfg.agents.agenda_extract_event_name
-    if 'concert' in m.content.lower() or m.attachments:
+    if m.attachments:
         system_prompt_event = cfg.agents.agenda_extract_artist
         path = Path(cfg.agenda.path_concert) / "concerts.json"
         index = {}
@@ -142,16 +142,16 @@ def _execute_save(bot, m):
     date = resp_date.get("date")
 
     logger.debug(f"_execute_save extract data : {event} | {venue} | {date} ")
-    already_exists = any(
-        item.get("data", {}).get("event", "").lower() == event.lower() or
-        item.get("data", {}).get("date") == date
-        for item in index.values()
-    )
-
-    if already_exists:
-        return f"**{event}** or this date is already in the calendar."
-
     if m.attachments:
+        already_exists = any(
+            item.get("data", {}).get("event", "").lower() == event.lower() or
+            item.get("data", {}).get("date") == date
+            for item in index.values()
+        )
+
+        if already_exists:
+            return f"**{event}** or this date is already in the calendar."
+
         attachment = m.attachments[0]
         filename = attachment.filename
         save_dir = Path(cfg.agenda.path_concert)
