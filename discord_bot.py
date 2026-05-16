@@ -176,37 +176,37 @@ class DiscordBot(commands.Bot):
         if m.author == self.user:
             return
 
-        for plugin_name in self.plugin_name_list:
-            if m.channel.name.startswith(plugin_name):
-                method_name = f"handle_{plugin_name}"
-                if hasattr(self, method_name):
-                    await getattr(self, method_name)(m)
-                    return
+        async with m.channel.typing():
+            for plugin_name in self.plugin_name_list:
+                if m.channel.name.startswith(plugin_name):
+                    method_name = f"handle_{plugin_name}"
+                    if hasattr(self, method_name):
+                        await getattr(self, method_name)(m)
+                        return
 
-        ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
-        if m.channel.name.startswith(ignore_prefixes):
-            return
+            ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
+            if m.channel.name.startswith(ignore_prefixes):
+                return
 
-        if m.channel.name.startswith(cfg.bot.channels.os_prefix):
-            await self.handle_channel_no_memory(m)
-        else:
-            await self.handle_channel(m)
+            if m.channel.name.startswith(cfg.bot.channels.os_prefix):
+                await self.handle_channel_no_memory(m)
+            else:
+                await self.handle_channel(m)
 
     async def handle_channel(self, m):
         done = asyncio.Event()
-        async with m.channel.typing():
-            self.llm_queue.put({
-                "channel_name": m.channel.name,
-                "topic": getattr(m.channel, 'topic', ''),
-                "content": m.content,
-                "author_id": m.author.id,
-                "message_id": m.id,
-                "done_event": done
-            })
-            try:
-                await asyncio.wait_for(done.wait(), timeout=90.0)
-            except asyncio.TimeoutError:
-                logger.info(f"Timeout: {m.id}")
+        self.llm_queue.put({
+            "channel_name": m.channel.name,
+            "topic": getattr(m.channel, 'topic', ''),
+            "content": m.content,
+            "author_id": m.author.id,
+            "message_id": m.id,
+            "done_event": done
+        })
+        try:
+            await asyncio.wait_for(done.wait(), timeout=90.0)
+        except asyncio.TimeoutError:
+            logger.info(f"Timeout: {m.id}")
 
     async def handle_channel_no_memory(self, m):
         await self.handle_channel(m)
