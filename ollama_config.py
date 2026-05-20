@@ -4,15 +4,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_OPTIONS = {
-    'temperature': 0,
     'keep_alive': 0,
     'num_predict': 1000,
     'num_ctx': 16384,
-    'think': False
+    'temperature': 0.6,
+    'top_p': 0.8,
+    'top_k': 20,
+    'min_p': 0.0,
+    'presence_penalty': 1.5,
+    'repetition_penalty': 1.0
 }
 
 THINKING_OPTIONS = {
-    'num_predict': 8000
+    'num_predict': 16384
 }
 
 PROFILES = {

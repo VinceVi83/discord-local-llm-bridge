@@ -5,6 +5,7 @@ from config_loader import cfg
 from ollama_config import OllamaConfig
 from ollama_service import llm
 from discord_janitor import DiscordJanitor
+from whisper_engine import WhisperEngine
 from pathlib import Path
 import importlib
 import logging
@@ -41,6 +42,8 @@ class DiscordBot(commands.Bot):
         self.worker_thread = None
         self.pending_autostarts = []
         self.janitor = None
+        self.whisper = None
+        self.whisper_ready = False
 
         self.scheduler = AsyncIOScheduler()
         self.plugin_name_list = []
@@ -109,6 +112,14 @@ class DiscordBot(commands.Bot):
                 asyncio.create_task(asyncio.to_thread(func))
             
             self.pending_autostarts.clear()
+            try:
+                self.whisper = await asyncio.to_thread(WhisperEngine, mode=cfg.whisper.mode, lang=cfg.whisper.language)
+                logger.info("Whisper loaded.")
+            except Exception as e:
+                    logger.error(f"Could not load WhisperEngine: {e}")
+
+            self.whisper_ready = True
+
             self.initialized = True
         else:
             logger.info("Reconnection detected, skipping initialization.")
@@ -168,6 +179,34 @@ class DiscordBot(commands.Bot):
         else:
             await self.command_help(m)
 
+    async def transcribe_audio(self, m):
+        if not self.whisper_ready or self.whisper is None:
+            return False
+
+        path = f"/tmp/{m.id}.ogg"
+        attachment = m.attachments[0]
+        
+        try:
+            await attachment.save(path)
+            text = await asyncio.to_thread(self.whisper.transcribe, path)
+            
+            if text:
+                m.content = text
+                m.attachments = []
+                await m.channel.send(f"<@!{m.author.id}> Transcription success {m.content}.")
+                return True
+            else:
+                await m.channel.send(f"<@!{m.author.id}> Transcription failed.")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during transcription : {e}", exc_info=True)
+            return False
+            
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
     async def on_message(self, m):
         if m.content.startswith('!'):
             await self.execute_command(m)
@@ -175,6 +214,10 @@ class DiscordBot(commands.Bot):
 
         if m.author == self.user:
             return
+
+        if m.attachments and m.attachments[0].filename.endswith('.ogg'):
+            async with m.channel.typing():
+                await self.transcribe_audio(m)
 
         async with m.channel.typing():
             for plugin_name in self.plugin_name_list:

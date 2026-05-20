@@ -14,15 +14,22 @@ system:
   purge_on_start: true
 
 ollama:
-  host: "http://localhost:11434"
-  default_model: "qwen2.5:7b"
-  fallback_model: "llama3"
+  local_url: "http://localhost:11434"
+  wan_url: "http://192.168.0.XX:11434"
+  default_model_lan: "ministral-3:3b"
+  fallback_model_lan: "qwen2.5:3b"
+  default_model_wan: "qwen3.5:9B"
+  fallback_model_wan: "qwen2.5:14b"
   timeout: 90
-  agents_dir: "./agents"
   options:
     temperature: 0.7
     num_ctx: 4096
     top_p: 0.9
+
+whisper:
+    mode: CPU
+    language: fr
+    skip: skip
 
 multiroom:
   python_bin: "/home/user/PYTHON_PROJECT_ENV/bin/python"

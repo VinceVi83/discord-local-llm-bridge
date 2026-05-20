@@ -138,7 +138,9 @@ def _execute_save(bot, m):
     resp_venue = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_extract_venue, m.content)
     venue = resp_venue.get("location", "Unknown")
 
-    resp_date = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_extract_date, m.content)
+    now = datetime.now().strftime("%Y%m%dT%H%M%S")
+    agent_date = cfg.agents.agenda_extract_date.replace('{now}', now)
+    resp_date = Utils.llm_call('qwen2.5:3b', agent_date, m.content)
     date = resp_date.get("date")
 
     logger.debug(f"_execute_save extract data : {event} | {venue} | {date} ")
