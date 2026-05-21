@@ -3,6 +3,7 @@ import json
 import logging
 import vobject
 import requests
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 from config_loader import cfg
@@ -38,17 +39,15 @@ def parse_datetime(raw_dt):
     return raw_dt
 
 def parse_event_datetime(event):
-    raw_dt = event.get('dt') or event.get('start')
+    raw_dt = event.get('start') or event.get('dtstart') or event.get('dt')
+    return parse_datetime(raw_dt)
+
+def parse_end_event_datetime(event):
+    raw_dt = event.get('end') or event.get('dtend') or event.get('dt')
     return parse_datetime(raw_dt)
 
 def is_event_for_today(event_datetime):
     return event_datetime.date() == datetime.now().date()
-
-def get_resume_time(event_datetime):
-    resume_time = event_datetime + timedelta(minutes=30)
-    if resume_time < datetime.now():
-        resume_time = datetime.now() + timedelta(hours=1)
-    return resume_time
 
 def fire_alarm(bot, event):
     summary = event.get('summary', 'Event')
@@ -85,7 +84,8 @@ def fire_alarm(bot, event):
     except Exception as e:
         logger.error(f"Critical error in fire_alarm dispatch: {e}")
 
-    run_time = datetime.now() + timedelta(minutes=30)
+    event_datetime = parse_end_event_datetime(event)
+    run_time = event_datetime + timedelta(minutes=30)
     bot.scheduler.add_job(
         task_sync_daily_alarm,
         'date',
@@ -251,15 +251,11 @@ def _format_week(label, events):
         return f"No events for {label}."
     return f"**{label}:**\n" + "\n".join([f"• {e['dt'].strftime('%a %d')}: {e['summary']}" for e in events])
 
-@scheduled(autostart=True, trigger="cron", hour=1, minute=0)
+@scheduled(autostart=True, trigger="cron", hour=6, minute=0)
 def task_sync_daily_alarm(bot):
-    from datetime import datetime, timedelta
-    import traceback
-
     try:
         events = calendar_plugin.fetch_calendar_events(limit=1)
         if not events:
-            bot.scheduler.add_job(task_sync_daily_alarm, 'date', run_date=datetime.now() + timedelta(hours=1), args=[bot])
             return
 
         event = events[0]
@@ -273,8 +269,8 @@ def task_sync_daily_alarm(bot):
                 already_notified = True
 
         if already_notified:
-            event_datetime = parse_event_datetime(event)
-            resume_time = get_resume_time(event_datetime)
+            event_datetime = parse_end_event_datetime(event)
+            resume_time = event_datetime + timedelta(minutes=30)
             logger.info(f"'{summary}' already notified (Hash match). Pause until {resume_time}")
             bot.scheduler.add_job(task_sync_daily_alarm, 'date', run_date=resume_time, args=[bot])
             return
@@ -283,7 +279,6 @@ def task_sync_daily_alarm(bot):
 
         if not is_event_for_today(event_datetime):
             logger.info(f"'{summary}' is not for today.")
-            bot.scheduler.add_job(task_sync_daily_alarm, 'date', run_date=datetime.now() + timedelta(hours=1), args=[bot])
             return
 
         alarm_time = event_datetime - timedelta(hours=2)
@@ -303,4 +298,3 @@ def task_sync_daily_alarm(bot):
 
     except Exception as e:
         logger.error(f"ERROR : {e}\n{traceback.format_exc()}")
-        bot.scheduler.add_job(task_sync_daily_alarm, 'date', run_date=datetime.now() + timedelta(minutes=30), args=[bot])
