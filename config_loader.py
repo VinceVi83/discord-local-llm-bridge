@@ -20,8 +20,8 @@ class LocalFilesFilter(logging.Filter):
             for part in path.parts:
                 if part.startswith('.'):
                     break
-            else:
-                self.local_files.add(path.name)
+                else:
+                    self.local_files.add(path.name)
 
     def filter(self, record):
         return record.filename in self.local_files

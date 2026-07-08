@@ -9,13 +9,14 @@ from whisper_engine import WhisperEngine
 from pathlib import Path
 import importlib
 import logging
+
 logger = logging.getLogger(__name__)
 
 class DiscordBot(commands.Bot):
     """Discord Bot for AI-powered chat interactions
-    
+
     Role: Manages Discord bot operations, LLM integration, and multiroom messaging.
-    
+
     Methods:
         __init__(self, *args, **kwargs) : Initialize the Discord bot client.
         load_plugins(self) : Load and register plugin handlers and scheduled tasks.
@@ -35,7 +36,6 @@ class DiscordBot(commands.Bot):
         intents.guilds = True
         intents.messages = True
         intents.message_content = True
-        
         super().__init__(command_prefix="!", intents=intents, *args, **kwargs)
         self.initialized = False
         self.llm_queue = queue.Queue()
@@ -74,7 +74,6 @@ class DiscordBot(commands.Bot):
                         bound_func = func.__get__(self, self.__class__)
                         async def task_wrapper(f=bound_func):
                             await asyncio.to_thread(f)
-                            
                         scheduler_config = {k: v for k, v in config.items() if k != "autostart"}
                         self.scheduler.add_job(task_wrapper, **scheduler_config)
                         logger.info(f"Task scheduled (Threaded): {plugin_dir.name} -> {item}")
@@ -110,7 +109,6 @@ class DiscordBot(commands.Bot):
             for func in self.pending_autostarts:
                 logger.info(f"Autostart launch: {func.__name__}")
                 asyncio.create_task(asyncio.to_thread(func))
-            
             self.pending_autostarts.clear()
             try:
                 self.whisper = await asyncio.to_thread(WhisperEngine, mode=cfg.whisper.mode, lang=cfg.whisper.language)
@@ -119,7 +117,6 @@ class DiscordBot(commands.Bot):
                     logger.error(f"Could not load WhisperEngine: {e}")
 
             self.whisper_ready = True
-
             self.initialized = True
         else:
             logger.info("Reconnection detected, skipping initialization.")
@@ -185,11 +182,9 @@ class DiscordBot(commands.Bot):
 
         path = f"/tmp/{m.id}.ogg"
         attachment = m.attachments[0]
-        
         try:
             await attachment.save(path)
             text = await asyncio.to_thread(self.whisper.transcribe, path)
-            
             if text:
                 m.content = text
                 m.attachments = []
@@ -198,11 +193,9 @@ class DiscordBot(commands.Bot):
             else:
                 await m.channel.send(f"<@!{m.author.id}> Transcription failed.")
                 return False
-                
         except Exception as e:
             logger.error(f"Error during transcription : {e}", exc_info=True)
             return False
-            
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -219,7 +212,11 @@ class DiscordBot(commands.Bot):
             async with m.channel.typing():
                 await self.transcribe_audio(m)
 
+        if m.channel.name.startswith('note-'):
+            return
+
         async with m.channel.typing():
+            logger.info(f"Test {m.channel.name} : {self.plugin_name_list}")
             for plugin_name in self.plugin_name_list:
                 if m.channel.name.startswith(plugin_name):
                     method_name = f"handle_{plugin_name}"
@@ -269,7 +266,6 @@ class DiscordBot(commands.Bot):
                     res = llm.generate(conf).get('content', "Generation error")
 
                 loop.call_soon_threadsafe(task['done_event'].set)
-
                 payload = {
                     "channel_name": task['channel_name'],
                     "msg": f"<@!{task['author_id']}> {res}",
@@ -281,14 +277,12 @@ class DiscordBot(commands.Bot):
             finally:
                 self.llm_queue.task_done()
 
-    
     def get_config_from_topic(self, topic: str) -> OllamaConfig:
         config = OllamaConfig()
         if not topic:
             return config
 
         header, _, system_prompt = topic.partition('---')
-        
         if system_prompt:
             config.system_prompt = system_prompt.strip()
 
@@ -297,13 +291,10 @@ class DiscordBot(commands.Bot):
 
         if 'model' in settings:
             config.model = settings.pop('model')
-        
         if 'soul' in settings:
             config.personality = settings.pop('soul')
-            
         if 'profile' in settings:
             config.set_profile(settings.pop('profile'))
-
         for key, value in settings.items():
             if key in config.options:
                 orig_type = type(config.options[key])
@@ -316,7 +307,6 @@ class DiscordBot(commands.Bot):
                     pass 
             else:
                 config.options[key] = value
-
         return config
 
     async def send_smart_split(self, channel, text, limit=1900, files=None):
@@ -324,7 +314,6 @@ class DiscordBot(commands.Bot):
         lang = ""
         remaining_text = text if text else ""
         chunks = []
-
         while remaining_text:
             if len(remaining_text) <= limit:
                 chunk, remaining_text = remaining_text, ""
@@ -335,7 +324,7 @@ class DiscordBot(commands.Bot):
                 if cut < limit * 0.5:
                     cut = remaining_text.rfind(' ', 0, limit)
                 cut = cut if cut != -1 else limit
-                chunk, remaining_text = remaining_text[:cut], remaining_text[cut:].lstrip()
+                chunk, remaining_text = remaining_text[:cut], remaining_text[cut:]
 
             ticks = chunk.count('```')
             if in_code:
@@ -348,12 +337,10 @@ class DiscordBot(commands.Bot):
                 in_code = True
                 last = chunk.rfind('```')
                 nl = chunk.find('\n', last)
-                lang = chunk[last+3:nl].strip() if nl != -1 else ""
+                lang = chunk[last+3:nl] if nl != -1 else ""
                 chunk += "\n```"
                 remaining_text = f"```{lang}\n" + remaining_text
-            
             chunks.append(chunk)
-
             discord_files = files if files else []
 
         if not chunks:
@@ -363,7 +350,6 @@ class DiscordBot(commands.Bot):
 
         for i, chunk in enumerate(chunks):
             is_last = (i == len(chunks) - 1)
-            
             if is_last and discord_files:
                 await channel.send(content=chunk, files=discord_files)
             else:
