@@ -30,3 +30,4 @@ Everything following the triple dashes defines the **AI's role and instructions*
 * `!help`: Displays this configuration guide.
 * `!archive_clean`: Wipes the channel history while migrating all Topic settings to a new channel.
 * `!restart`: Restart application.
+* `!ip`: Displays WAN IP.

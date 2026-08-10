@@ -2,6 +2,7 @@ import sys
 import logging
 import yaml
 import shutil
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,6 +108,18 @@ class DiscordBridgeConfig:
         self.cfg = self._dict_to_namespace(self._load_yaml())
         self.cfg.agents = self._load_agents()
         self.cfg.config_dir = self.BASE_DIR
+        self.cfg.ip_lan = self.get_local_ip()
+
+    def get_local_ip(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0)
+            s.connect(("10.255.255.255", 1))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except Exception:
+            return "127.0.0.1"
 
     def _setup_files(self):
         self.BASE_DIR.mkdir(parents=True, exist_ok=True)

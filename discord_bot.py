@@ -9,6 +9,7 @@ from whisper_engine import WhisperEngine
 from pathlib import Path
 import importlib
 import logging
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -44,143 +45,199 @@ class DiscordBot(commands.Bot):
         self.janitor = None
         self.whisper = None
         self.whisper_ready = False
+        self.discord_cmdlist = getattr(cfg.bot, 'cmdlist', {})
+
+        dynamic_commands = ''
+        for cmd_name, response_text in vars(self.discord_cmdlist).items():
+            preview = str(response_text).replace('\n', ' ')[:50]
+            dynamic_commands += f'* `!{cmd_name}`: {preview}\n'
+        
+        if dynamic_commands:
+            cfg.agents.help += '\n## Custom Commands\n' + dynamic_commands
 
         self.scheduler = AsyncIOScheduler()
         self.plugin_name_list = []
 
     def load_plugins(self):
-        plugins_path = Path("plugins")
+        plugins_path = Path('plugins')
         if not plugins_path.exists():
             return
 
         for plugin_dir in plugins_path.iterdir():
-            service_file = plugin_dir / "service.py"
+            service_file = plugin_dir / 'service.py'
             if not plugin_dir.is_dir() or not service_file.exists():
                 continue
             try:
-                module_path = f"plugins.{plugin_dir.name}.service"
+                module_path = f'plugins.{plugin_dir.name}.service'
                 module = importlib.import_module(module_path)
 
                 for item in dir(module):
                     func = getattr(module, item)
-                    if item.startswith("handle_"):
+                    if item.startswith('handle_'):
                         setattr(self, item, func.__get__(self, self.__class__))
                         if plugin_dir.name not in self.plugin_name_list:
                             self.plugin_name_list.append(plugin_dir.name)
-                        logger.info(f"Plugin loaded: {plugin_dir.name} -> {item}")
+                        logger.info(f'Plugin loaded: {plugin_dir.name} -> {item}')
 
-                    elif item.startswith("task_") and hasattr(func, "schedule_config"):
+                    elif item.startswith('task_') and hasattr(func, 'schedule_config'):
                         config = func.schedule_config
                         bound_func = func.__get__(self, self.__class__)
                         async def task_wrapper(f=bound_func):
                             await asyncio.to_thread(f)
-                        scheduler_config = {k: v for k, v in config.items() if k != "autostart"}
+                        scheduler_config = {k: v for k, v in config.items() if k != 'autostart'}
                         self.scheduler.add_job(task_wrapper, **scheduler_config)
-                        logger.info(f"Task scheduled (Threaded): {plugin_dir.name} -> {item}")
+                        logger.info(f'Task scheduled (Threaded): {plugin_dir.name} -> {item}')
 
-                        if config.get("autostart", False):
+                        if config.get('autostart', False):
                             self.pending_autostarts.append(bound_func)
-                            logger.info(f"Task queued for autostart: {plugin_dir.name}")
+                            logger.info(f'Task queued for autostart: {plugin_dir.name}')
 
             except Exception as e:
-                logger.error(f"Failed to load plugin {plugin_dir.name}: {e}")
+                logger.error(f'Failed to load plugin {plugin_dir.name}: {e}')
 
     async def on_ready(self):
-        logger.info(f"Logged in as {self.user}")
+        logger.info(f'Logged in as {self.user}')
         if not self.initialized:
             self.load_plugins()
-            if not self.get_cog("DiscordJanitor"):
+            if not self.get_cog('DiscordJanitor'):
                 try:
                     await self.add_cog(DiscordJanitor(self))
-                    logger.info("DiscordJanitor Cog loaded successfully.")
+                    logger.info('DiscordJanitor Cog loaded successfully.')
                 except Exception as e:
-                    logger.error(f"Could not load DiscordJanitor: {e}")
+                    logger.error(f'Could not load DiscordJanitor: {e}')
 
             loop = asyncio.get_running_loop()
             if not self.worker_thread:
                 self.worker_thread = threading.Thread(target=self.llm_worker, args=(loop,), daemon=True)
                 self.worker_thread.start()
-                logger.info("LLM Worker thread started.")
+                logger.info('LLM Worker thread started.')
 
             if not self.scheduler.running:
                 self.scheduler._eventloop = loop 
                 self.scheduler.start()
 
             for func in self.pending_autostarts:
-                logger.info(f"Autostart launch: {func.__name__}")
+                logger.info(f'Autostart launch: {func.__name__}')
                 asyncio.create_task(asyncio.to_thread(func))
             self.pending_autostarts.clear()
             try:
                 self.whisper = await asyncio.to_thread(WhisperEngine, mode=cfg.whisper.mode, lang=cfg.whisper.language)
-                logger.info("Whisper loaded.")
+                logger.info('Whisper loaded.')
             except Exception as e:
-                    logger.error(f"Could not load WhisperEngine: {e}")
+                    logger.error(f'Could not load WhisperEngine: {e}')
 
             self.whisper_ready = True
             self.initialized = True
         else:
-            logger.info("Reconnection detected, skipping initialization.")
+            logger.info('Reconnection detected, skipping initialization.')
 
         try:
             channel_name = cfg.bot.notification
             channel = discord.utils.get(self.get_all_channels(), name=channel_name)
             if channel:
-                await channel.send(f"**A.L.I.S.U : System restarted**\nNotification server is back online.")
+                await channel.send(f'**A.L.I.S.U : System restarted**\nNotification server is back online.')
             else:
-                logger.info(f"Unable to send notification: channel '{channel_name}' not found.")
+                logger.info(f'Unable to send notification: channel "{channel_name}" not found.')
         except Exception as e:
-            logger.info(f"Error sending startup message: {e}")
-        logger.info(f"{self.user} connected.")
+            logger.info(f'Error sending startup message: {e}')
+        logger.info(f'{self.user} connected.')
 
     async def clean_channel(self, channel):
         try:
             old_ch = channel
             settings = {
-                "name": old_ch.name,
-                "topic": old_ch.topic,
-                "position": old_ch.position,
-                "nsfw": old_ch.nsfw,
-                "slowmode_delay": old_ch.slowmode_delay,
-                "category": old_ch.category,
-                "overwrites": old_ch.overwrites
+                'name': old_ch.name,
+                'topic': old_ch.topic,
+                'position': old_ch.position,
+                'nsfw': old_ch.nsfw,
+                'slowmode_delay': old_ch.slowmode_delay,
+                'category': old_ch.category,
+                'overwrites': old_ch.overwrites
             }
 
-            new_ch = await old_ch.clone(reason="Channel Clean & Parameter Migration")
+            new_ch = await old_ch.clone(reason='Channel Clean & Parameter Migration')
             await new_ch.edit(
-                topic=settings["topic"],
-                position=settings["position"],
-                nsfw=settings["nsfw"],
-                slowmode_delay=settings["slowmode_delay"]
+                topic=settings['topic'],
+                position=settings['position'],
+                nsfw=settings['nsfw'],
+                slowmode_delay=settings['slowmode_delay']
             )
 
             await old_ch.delete()
             logger.info(f"Channel cleaned: '{settings['name']}'. Parameters successfully migrated from {old_ch.id} to {new_ch.id}.")
             return
         except Exception as e:
-            logger.error(f"Error during channel clean/migration for {channel.id}: {e}")
+            logger.error(f'Error during channel clean/migration for {channel.id}: {e}')
             return
 
     async def command_help(self, m):
+        wan = await self.get_wan_ip()
+        readme = cfg.agents.help.replace('#wan#', wan).replace('#lan#', cfg.ip_lan)
         await self.send_smart_split(
             channel=m.channel,
-            text=cfg.agents.help
+            text=readme
         )
 
+    async def get_wan_ip(self):
+        services = [
+            'https://api.ipify.org',
+            'https://api.ip.sb/ip',
+            'https://ifconfig.me/ip',
+            'https://icanhazip.com',
+            'https://checkip.amazonaws.com',
+        ]
+
+        async with aiohttp.ClientSession() as session:
+            for url in services:
+                try:
+                    async with session.get(url, timeout=5) as resp:
+                        ip = (await resp.text()).strip()
+                        if ip:
+                            return ip
+                except Exception:
+                    continue
+        return None
+
     async def execute_command(self, m):
+        try:
+            wan = await self.get_wan_ip()
+        except:
+            pass
         if m.content == '!archive_clean':
             await self.clean_channel(m.channel)
         elif m.content == '!restart':
-            await subprocess.Popen(["sudo", "/usr/local/bin/multiroom-restart"])
+            await subprocess.Popen(['sudo', '/usr/local/bin/multiroom-restart'])
         elif m.content == '!reboot':
-            await subprocess.Popen(["sudo", "reboot"])
+            await subprocess.Popen(['sudo', 'reboot'])
+        elif m.content == '!skillist':
+            await self.send_smart_split(
+                channel=m.channel,
+                text=f'skillist'
+            )
+        elif m.content == '!skill':
+            m.content.replace('!skill ', '')
+        elif m.content == '!reboot':
+            await subprocess.Popen(['sudo', 'reboot'])
+        elif m.content == '!wan':
+            await self.send_smart_split(
+                channel=m.channel,
+                text=f'ip wan : {wan}'
+            )
         else:
+            for command_name, response in vars(self.discord_cmdlist).items():
+                if m.content.strip() == f'!{command_name}':
+                    await self.send_smart_split(
+                        channel=m.channel,
+                        text=response.replace('#wan#', wan).replace('#lan#', cfg.ip_lan)
+                    )
+                    return
             await self.command_help(m)
 
     async def transcribe_audio(self, m):
         if not self.whisper_ready or self.whisper is None:
             return False
 
-        path = f"/tmp/{m.id}.ogg"
+        path = f'/tmp/{m.id}.ogg'
         attachment = m.attachments[0]
         try:
             await attachment.save(path)
@@ -188,13 +245,13 @@ class DiscordBot(commands.Bot):
             if text:
                 m.content = text
                 m.attachments = []
-                await m.channel.send(f"<@!{m.author.id}> Transcription success {m.content}.")
+                await m.channel.send(f'<@!{m.author.id}> Transcription success {m.content}.')
                 return True
             else:
-                await m.channel.send(f"<@!{m.author.id}> Transcription failed.")
+                await m.channel.send(f'<@!{m.author.id}> Transcription failed.')
                 return False
         except Exception as e:
-            logger.error(f"Error during transcription : {e}", exc_info=True)
+            logger.error(f'Error during transcription : {e}', exc_info=True)
             return False
         finally:
             if os.path.exists(path):
@@ -216,10 +273,10 @@ class DiscordBot(commands.Bot):
             return
 
         async with m.channel.typing():
-            logger.info(f"Test {m.channel.name} : {self.plugin_name_list}")
+            logger.info(f'Test {m.channel.name} : {self.plugin_name_list}')
             for plugin_name in self.plugin_name_list:
                 if m.channel.name.startswith(plugin_name):
-                    method_name = f"handle_{plugin_name}"
+                    method_name = f'handle_{plugin_name}'
                     if hasattr(self, method_name):
                         await getattr(self, method_name)(m)
                         return
@@ -236,17 +293,17 @@ class DiscordBot(commands.Bot):
     async def handle_channel(self, m):
         done = asyncio.Event()
         self.llm_queue.put({
-            "channel_name": m.channel.name,
-            "topic": getattr(m.channel, 'topic', ''),
-            "content": m.content,
-            "author_id": m.author.id,
-            "message_id": m.id,
-            "done_event": done
+            'channel_name': m.channel.name,
+            'topic': getattr(m.channel, 'topic', ''),
+            'content': m.content,
+            'author_id': m.author.id,
+            'message_id': m.id,
+            'done_event': done
         })
         try:
             await asyncio.wait_for(done.wait(), timeout=90.0)
         except asyncio.TimeoutError:
-            logger.info(f"Timeout: {m.id}")
+            logger.info(f'Timeout: {m.id}')
 
     async def handle_channel_no_memory(self, m):
         await self.handle_channel(m)
@@ -259,19 +316,19 @@ class DiscordBot(commands.Bot):
             try:
                 conf = self.get_config_from_topic(task['topic'])
                 conf.set_content(task['content'])
-                res = llm.generate(conf).get('content', "")
+                res = llm.generate(conf).get('content', '')
 
                 if not res:
                     conf.model = 'qwen2.5:3b'
-                    res = llm.generate(conf).get('content', "Generation error")
+                    res = llm.generate(conf).get('content', 'Generation error')
 
                 loop.call_soon_threadsafe(task['done_event'].set)
                 payload = {
-                    "channel_name": task['channel_name'],
-                    "msg": f"<@!{task['author_id']}> {res}",
-                    "reply_to": task['message_id']
+                    'channel_name': task['channel_name'],
+                    'msg': f'<@!{task["author_id"]}> {res}',
+                    'reply_to': task['message_id']
                 }
-                requests.post(f"http://127.0.0.1:{cfg.system.port}/send", json=payload, timeout=15)
+                requests.post(f'http://127.0.0.1:{cfg.system.port}/send', json=payload, timeout=15)
             except:
                 traceback.print_exc()
             finally:
@@ -311,12 +368,12 @@ class DiscordBot(commands.Bot):
 
     async def send_smart_split(self, channel, text, limit=1900, files=None):
         in_code = False
-        lang = ""
-        remaining_text = text if text else ""
+        lang = ''
+        remaining_text = text if text else ''
         chunks = []
         while remaining_text:
             if len(remaining_text) <= limit:
-                chunk, remaining_text = remaining_text, ""
+                chunk, remaining_text = remaining_text, ''
             else:
                 cut = remaining_text.rfind('\n\n', 0, limit)
                 if cut < limit * 0.5:
@@ -331,15 +388,15 @@ class DiscordBot(commands.Bot):
                 if ticks % 2 != 0:
                     in_code = False
                 else:
-                    chunk += "\n```"
-                    remaining_text = f"```{lang}\n" + remaining_text
+                    chunk += '\n```'
+                    remaining_text = f'```{lang}\n' + remaining_text
             elif ticks % 2 != 0:
                 in_code = True
                 last = chunk.rfind('```')
                 nl = chunk.find('\n', last)
-                lang = chunk[last+3:nl] if nl != -1 else ""
-                chunk += "\n```"
-                remaining_text = f"```{lang}\n" + remaining_text
+                lang = chunk[last+3:nl] if nl != -1 else ''
+                chunk += '\n```'
+                remaining_text = f'```{lang}\n' + remaining_text
             chunks.append(chunk)
             discord_files = files if files else []
 
