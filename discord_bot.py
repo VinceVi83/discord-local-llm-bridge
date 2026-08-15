@@ -9,7 +9,6 @@ from whisper_engine import WhisperEngine
 from pathlib import Path
 import importlib
 import logging
-import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -45,18 +44,48 @@ class DiscordBot(commands.Bot):
         self.janitor = None
         self.whisper = None
         self.whisper_ready = False
-        self.discord_cmdlist = getattr(cfg.bot, 'cmdlist', {})
+        self.wanip = cfg.lanip
+        self.update_wanip()
 
-        dynamic_commands = ''
-        for cmd_name, response_text in vars(self.discord_cmdlist).items():
-            preview = str(response_text).replace('\n', ' ')[:50]
-            dynamic_commands += f'* `!{cmd_name}`: {preview}\n'
-        
-        if dynamic_commands:
-            cfg.agents.help += '\n## Custom Commands\n' + dynamic_commands
+        self.discord_cmdlist = getattr(cfg.bot, 'cmdlist', {})
+        self.discord_infolist = getattr(cfg.bot, 'infolist', {})
+        self.update_help_cmd()
 
         self.scheduler = AsyncIOScheduler()
         self.plugin_name_list = []
+
+    def get_wanip(self):
+        try:
+            response = requests.get('https://api.ipify.org', timeout=5)
+            if response.status_code == 200:
+                return response.text.strip()
+            return None
+        except Exception as e:
+            logger.error(f'Error to retrieve WAN IP: {e}')
+            return None
+
+    def update_wanip(self):
+        try:
+            self.wanip = self.get_wanip()
+        except:
+            self.wanip = cfg.lanip
+
+    def update_help_cmd(self):
+        dynamic_commands = ''
+        for cmd_name, response_text in vars(self.discord_cmdlist).items():
+            preview = str(response_text).replace('\n', ' ')
+            dynamic_commands += f'* `!{cmd_name}`: {preview}\n'
+
+        dynamic_infos = ''
+        for info_name, info_text in vars(self.discord_infolist).items():
+            preview = str(info_text).replace('\n', ' ')
+            dynamic_infos += f'* `!{info_name}`: {preview}\n'
+
+        if dynamic_commands:
+            cfg.agents.help += '\n## Custom Commands\n' + dynamic_commands
+
+        if dynamic_infos:
+            cfg.agents.help += '\n## Information Links\n' + dynamic_infos
 
     def load_plugins(self):
         plugins_path = Path('plugins')
@@ -171,64 +200,64 @@ class DiscordBot(commands.Bot):
             return
 
     async def command_help(self, m):
-        wan = await self.get_wan_ip()
-        readme = cfg.agents.help.replace('#wan#', wan).replace('#lan#', cfg.ip_lan)
+        readme = cfg.agents.help.replace('#lan#', cfg.lanip)
         await self.send_smart_split(
             channel=m.channel,
             text=readme
         )
 
-    async def get_wan_ip(self):
-        services = [
-            'https://api.ipify.org',
-            'https://api.ip.sb/ip',
-            'https://ifconfig.me/ip',
-            'https://icanhazip.com',
-            'https://checkip.amazonaws.com',
-        ]
+    async def run_command(self, command, cwd=None):
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd
+        )
+        stdout, stderr = await process.communicate()
+        return process.returncode, stdout.decode(), stderr.decode()
 
-        async with aiohttp.ClientSession() as session:
-            for url in services:
-                try:
-                    async with session.get(url, timeout=5) as resp:
-                        ip = (await resp.text()).strip()
-                        if ip:
-                            return ip
-                except Exception:
-                    continue
-        return None
+    def _parse_command_config(self, command_config):
+        if isinstance(command_config, str):
+            return command_config, None
+        try:
+            cmd = command_config.cmd if hasattr(command_config, 'cmd') else command_config.get('cmd')
+            cwd = getattr(command_config, 'dir', None) or (command_config.get('dir', None) if isinstance(command_config, dict) else None)
+            return cmd or str(command_config), cwd
+        except:
+            cmd = command_config.cmd if hasattr(command_config, 'cmd') else command_config.get('cmd')
+            return cmd, None
 
     async def execute_command(self, m):
-        try:
-            wan = await self.get_wan_ip()
-        except:
-            pass
-        if m.content == '!archive_clean':
+        if m.content == '!clean':
             await self.clean_channel(m.channel)
-        elif m.content == '!restart':
-            await subprocess.Popen(['sudo', '/usr/local/bin/multiroom-restart'])
-        elif m.content == '!reboot':
-            await subprocess.Popen(['sudo', 'reboot'])
         elif m.content == '!skillist':
             await self.send_smart_split(
                 channel=m.channel,
                 text=f'skillist'
             )
-        elif m.content == '!skill':
-            m.content.replace('!skill ', '')
-        elif m.content == '!reboot':
-            await subprocess.Popen(['sudo', 'reboot'])
-        elif m.content == '!wan':
+        elif m.content == '!saas':
             await self.send_smart_split(
                 channel=m.channel,
-                text=f'ip wan : {wan}'
+                text=f'skillist'
             )
         else:
-            for command_name, response in vars(self.discord_cmdlist).items():
+            for command_name, command_config in vars(self.discord_cmdlist).items():
                 if m.content.strip() == f'!{command_name}':
+                    command, cwd = self._parse_command_config(command_config)
+                    returncode, stdout, stderr = await self.run_command(command, cwd)
+                    logger.info(f'Result: {returncode} | {stdout} | {stderr}')
                     await self.send_smart_split(
                         channel=m.channel,
-                        text=response.replace('#wan#', wan).replace('#lan#', cfg.ip_lan)
+                        text=f'Executed {command} :\n {stdout}'
+                    )
+                    return
+
+            for info_name, info_text in vars(self.discord_infolist).items():
+                if m.content.strip() == f'!{info_name}':
+                    formated_info = info_text.replace('#wan#', self.wanip).replace('#lan#', cfg.lanip)
+                    await self.send_smart_split(
+                        channel=m.channel,
+                        text=formated_info
                     )
                     return
             await self.command_help(m)

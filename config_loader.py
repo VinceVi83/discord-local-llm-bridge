@@ -108,7 +108,7 @@ class DiscordBridgeConfig:
         self.cfg = self._dict_to_namespace(self._load_yaml())
         self.cfg.agents = self._load_agents()
         self.cfg.config_dir = self.BASE_DIR
-        self.cfg.ip_lan = self.get_local_ip()
+        self.cfg.lanip = self.get_local_ip()
 
     def get_local_ip(self):
         try:
