@@ -2,9 +2,13 @@ import json
 from contextlib import AsyncExitStack
 from mcp import ClientSession
 from mcp.client.sse import sse_client
-from ollama_config import OllamaConfig
-from ollama_service import llm
 import asyncio
+from common.conf_manager import cfg, setup_logging, Utils
+from common.llm_client import llm, llm_async
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class MCPBotSSE:
     def __init__(self, host="127.0.0.1", port="13316"):
@@ -27,19 +31,9 @@ class MCPBotSSE:
     async def request(self, user_content):
         await self.connect()
         system_prompt = await self._build_system_prompt()
-
-        conf = OllamaConfig()
-        conf.model = 'qwen2.5:7b'
-        conf.format = 'json'
-        conf.options.update({
-            "temperature": 0.0,
-            "top_p": 0.1
-        })
-        conf.set_system(system_prompt)
-        conf.set_content(user_content)
-
-        decision = await asyncio.to_thread(llm.generate, conf)
-        
+        decision = await llm_async.call(system_prompt, user_content, model='qwen3.8:27b')
+        decision = Utils.str_to_dict(decision['content'])
+        logger.info(f"Decision: {decision}")
         if "error" in decision:
             return f"Error: {decision.get('error')}"
 
@@ -55,12 +49,7 @@ class MCPBotSSE:
             else:
                 text_result = str(result.content)
 
-            final_conf = OllamaConfig()
-            final_conf.model = 'qwen3.5:9b'
-            final_conf.set_system("You are a helpful assistant. Provide a clear and natural language answer to the user based on the tool output provided.")
-            final_conf.set_content(f"Initial user request: {user_content}\nExecuted tool output: {text_result}")
-
-            final_response = await asyncio.to_thread(llm.generate, final_conf)
+            final_response = await llm_async.call("You are a helpful assistant. Provide a clear and natural language answer to the user based on the tool output provided.", f"Initial user request: {user_content}\nExecuted tool output: {text_result}", model='qwen3.8:27b')
             return final_response.get('content', 'I was unable to process the request.')
 
         elif action == "read_resource":
@@ -97,11 +86,6 @@ STRICT RULES:
   "name": "tool_name",
   "arguments": {{ "arg1": "value" }}
 }}
-3. If no tool is needed, respond with this JSON format:
-{{
-  "action": "reply",
-  "response": "Your message here"
-}}
 
 AVAILABLE TOOLS:
 {json.dumps(tools_info, indent=2)}
@@ -120,9 +104,13 @@ async def main():
     bot = MCPBotSSE(host="127.0.0.1", port="13316")
     
     # print(await bot.request("Quelle est la météo aujourd'hui ?"))
-    print(await bot.request("Recherche un trajet en transport en commun pour aller à la JAPAN EXPO"))
+    print(await bot.request("Quelle est la méteo demain"))
+    print(await bot.request("Liste moi les outils disponibles"))
+    # print(await bot.request("Je dois aller au boulot"))
+    # print(await bot.request("Départ pour le retour du travail"))
     
     await bot.close()
 
 if __name__ == "__main__":
+    setup_logging()
     asyncio.run(main())

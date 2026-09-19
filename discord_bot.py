@@ -3,7 +3,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from config_loader import cfg
 from ollama_config import OllamaConfig
-from ollama_service import llm
+from common.conf_manager import cfg, setup_logging, Utils
+from common.llm_client import llm, llm_async
 from discord_janitor import DiscordJanitor
 from whisper_engine import WhisperEngine
 from pathlib import Path
@@ -344,12 +345,10 @@ class DiscordBot(commands.Bot):
                 break
             try:
                 conf = self.get_config_from_topic(task['topic'])
-                conf.set_content(task['content'])
-                res = llm.generate(conf).get('content', '')
-
-                if not res:
-                    conf.model = 'qwen2.5:3b'
-                    res = llm.generate(conf).get('content', 'Generation error')
+                res = llm.call(conf.system_prompt, task['content'], model='qwen3.8:27b', mode='creative')
+                logger.info(f'LLM Response: {res}')
+                res = res['content']
+                logger.info(f'LLM Response: {res}')
 
                 loop.call_soon_threadsafe(task['done_event'].set)
                 payload = {
