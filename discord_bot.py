@@ -264,28 +264,30 @@ class DiscordBot(commands.Bot):
             await self.command_help(m)
 
     async def transcribe_audio(self, m):
-        if not self.whisper_ready or self.whisper is None:
-            return False
-
-        path = f'/tmp/{m.id}.ogg'
-        attachment = m.attachments[0]
+        text = None
         try:
-            await attachment.save(path)
-            text = await asyncio.to_thread(self.whisper.transcribe, path)
-            if text:
-                m.content = text
-                m.attachments = []
-                await m.channel.send(f'<@!{m.author.id}> Transcription success {m.content}.')
-                return True
-            else:
-                await m.channel.send(f'<@!{m.author.id}> Transcription failed.')
-                return False
+            if 'http' in m.attachments.url:
+                text = await llm_async.transcribe(req.command)['content']
         except Exception as e:
-            logger.error(f'Error during transcription : {e}', exc_info=True)
+            try:
+                if not self.whisper_ready or self.whisper is None:
+                    await m.channel.send(f'<@!{m.author.id}> Transcription failed, remote whisper KO and local whisper not init.')
+                    return False
+                path = f'/tmp/{m.id}.ogg'
+                await m.attachments[0].save(path)
+                text = await asyncio.to_thread(self.whisper.transcribe, path)
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except Exception as a:
+                await m.channel.send(f'<@!{m.author.id}> Local transcription failed. {e} {a}')
+                return False
+        if text:
+            m.content = text
+            m.attachments = []
+            await m.channel.send(f'<@!{m.author.id}> Transcription success {m.content}.')
+            return True
+        else:
             return False
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
 
     async def on_message(self, m):
         if m.content.startswith('!'):
