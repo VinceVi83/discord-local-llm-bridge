@@ -266,9 +266,10 @@ class DiscordBot(commands.Bot):
     async def transcribe_audio(self, m):
         text = None
         try:
-            if 'http' in m.attachments.url:
-                text = await llm_async.transcribe(req.command)['content']
+            result = await llm_async.transcribe(m.attachments[0].url)
+            text = result['content']
         except Exception as e:
+            logger.warning(f"Remote transcription failed: {e}")
             try:
                 if not self.whisper_ready or self.whisper is None:
                     await m.channel.send(f'<@!{m.author.id}> Transcription failed, remote whisper KO and local whisper not init.')
@@ -276,15 +277,15 @@ class DiscordBot(commands.Bot):
                 path = f'/tmp/{m.id}.ogg'
                 await m.attachments[0].save(path)
                 text = await asyncio.to_thread(self.whisper.transcribe, path)
+                await m.channel.send(f'<@!{m.author.id}> Local transcription success {m.content}.')
                 if path and os.path.exists(path):
                     os.remove(path)
-            except Exception as a:
-                await m.channel.send(f'<@!{m.author.id}> Local transcription failed. {e} {a}')
+            except Exception as e:
+                await m.channel.send(f'<@!{m.author.id}> Local transcription failed. {e}')
                 return False
         if text:
             m.content = text
             m.attachments = []
-            await m.channel.send(f'<@!{m.author.id}> Transcription success {m.content}.')
             return True
         else:
             return False
@@ -297,7 +298,7 @@ class DiscordBot(commands.Bot):
         if m.author == self.user:
             return
 
-        if m.attachments and m.attachments[0].filename.endswith('.ogg'):
+        if m.attachments:
             async with m.channel.typing():
                 await self.transcribe_audio(m)
 
@@ -305,7 +306,7 @@ class DiscordBot(commands.Bot):
             return
 
         async with m.channel.typing():
-            logger.info(f'Test {m.channel.name} : {self.plugin_name_list}')
+            logger.info(f'Channel {m.channel.name} : {self.plugin_name_list}')
             for plugin_name in self.plugin_name_list:
                 if m.channel.name.startswith(plugin_name):
                     method_name = f'handle_{plugin_name}'
@@ -316,7 +317,6 @@ class DiscordBot(commands.Bot):
             ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
             if m.channel.name.startswith(ignore_prefixes):
                 return
-
             if m.channel.name.startswith(cfg.bot.channels.os_prefix):
                 await self.handle_channel_no_memory(m)
             else:
