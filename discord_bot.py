@@ -349,7 +349,7 @@ class DiscordBot(commands.Bot):
                 break
             try:
                 conf = self.get_config_from_topic(task['topic'])
-                res = llm.call(conf.system_prompt, task['content'], model='qwen3.8:27b', mode='creative')
+                res = llm.call(conf.system_prompt, task['content'], model='qwen3.8:27b', mode='creative', timeout=300)
                 logger.info(f'LLM Response: {res}')
                 res = res['content']
                 logger.info(f'LLM Response: {res}')

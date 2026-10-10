@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 async def handle_multiroom(self, m):
     try:
-        Utils.send_command_multiroom('system', m.content)
+        Utils.send_command_multiroom(m.content)
         await m.add_reaction("✅")
         logger.info(f"Multiroom: Success for {m.author}")
     except Exception as e:
