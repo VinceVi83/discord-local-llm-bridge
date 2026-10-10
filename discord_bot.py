@@ -268,6 +268,7 @@ class DiscordBot(commands.Bot):
         try:
             result = await llm_async.transcribe(m.attachments[0].url)
             text = result['content']
+            await m.channel.send(f'<@!{m.author.id}> Transcription: {text}')
         except Exception as e:
             logger.warning(f"Remote transcription failed: {e}")
             try:
@@ -277,7 +278,7 @@ class DiscordBot(commands.Bot):
                 path = f'/tmp/{m.id}.ogg'
                 await m.attachments[0].save(path)
                 text = await asyncio.to_thread(self.whisper.transcribe, path)
-                await m.channel.send(f'<@!{m.author.id}> Local transcription success {m.content}.')
+                await m.channel.send(f'<@!{m.author.id}> Local transcription success {text}.')
                 if path and os.path.exists(path):
                     os.remove(path)
             except Exception as e:
@@ -288,6 +289,7 @@ class DiscordBot(commands.Bot):
             m.attachments = []
             return True
         else:
+            await m.channel.send(f'<@!{m.author.id}> Transcription failed: no text returned.')
             return False
 
     async def on_message(self, m):
