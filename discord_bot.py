@@ -1,7 +1,6 @@
 import discord, asyncio, threading, queue, traceback, os, subprocess, requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
-from config_loader import cfg
 from ollama_config import OllamaConfig
 from common.conf_manager import cfg, setup_logging, Utils
 from common.llm_client import llm, llm_async
@@ -319,7 +318,10 @@ class DiscordBot(commands.Bot):
             ignore_prefixes = tuple(vars(cfg.bot.ignore_channel).values())
             if m.channel.name.startswith(ignore_prefixes):
                 return
-            if m.channel.name.startswith(cfg.bot.channels.os_prefix):
+
+            if m.channel.name.startswith("skills"):
+                await self.handle_skills(m)
+            elif m.channel.name.startswith(cfg.bot.channels.os_prefix):
                 await self.handle_channel_no_memory(m)
             else:
                 await self.handle_channel(m)
@@ -341,6 +343,13 @@ class DiscordBot(commands.Bot):
 
     async def handle_channel_no_memory(self, m):
         await self.handle_channel(m)
+    
+    async def handle_skills(self, m):
+        result = await asyncio.to_thread(Utils.call_ask, m.content)
+        if result:
+            await self.send_smart_split(channel=m.channel, text=f'{result}')
+        else:
+            await m.channel.send('No skills found.')
 
     def llm_worker(self, loop):
         while True:
