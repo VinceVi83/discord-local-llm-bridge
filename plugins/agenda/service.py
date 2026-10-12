@@ -6,12 +6,11 @@ import requests
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
-from config_loader import cfg
-from ollama_service import llm
-from ollama_config import OllamaConfig
-from utils import Utils
+from common.conf_manager import cfg, Utils
+from common.llm_client import llm
 from plugins.agenda.my_calendar import CalendarService
 import hashlib
+import json
 
 logger = logging.getLogger(__name__)
 calendar_plugin = CalendarService()
@@ -132,16 +131,16 @@ def _execute_save(bot, m):
             except Exception as e:
                 logger.error(f"Error reading JSON: {e}")
 
-    resp_event = Utils.llm_call('qwen2.5:3b', system_prompt_event, m.content)
-    event = resp_event.get("event", "Unknown")
+    resp_event = llm.call(system_prompt_event, m.content, model='qwen2.5:3b')
+    event = json.loads(resp_event['content']).get("event", "Unknown")
 
-    resp_venue = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_extract_venue, m.content)
-    venue = resp_venue.get("location", "Unknown")
+    resp_venue = llm.call(cfg.agents.agenda_extract_venue, m.content, model='qwen2.5:3b')
+    venue = json.loads(resp_venue['content']).get("location", "Unknown")
 
     now = datetime.now().strftime("%Y%m%dT%H%M%S")
     agent_date = cfg.agents.agenda_extract_date.replace('{now}', now)
-    resp_date = Utils.llm_call('qwen2.5:3b', agent_date, m.content)
-    date = resp_date.get("date")
+    resp_date = llm.call(agent_date, m.content, model='qwen2.5:3b')
+    date = json.loads(resp_date['content']).get("date")
 
     logger.debug(f"_execute_save extract data : {event} | {venue} | {date} ")
     if m.attachments:
@@ -206,9 +205,8 @@ def manage_request(bot, m):
         if m.attachments:
             result_text = _execute_save(bot, m)
             return
-
-        resp = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_router, m.content)
-        action = resp.get("action")
+        resp = llm.call(cfg.agents.agenda_router, m.content, model='qwen2.5:3b')
+        action = json.loads(resp['content']).get("action")
         if not action:
             bot.loop.call_soon_threadsafe(lambda: asyncio.create_task(m.add_reaction("❌")))
             return
@@ -233,7 +231,7 @@ def manage_request(bot, m):
             result_text = _format_week("Next Week", events)
 
         if result_text:
-            resp = Utils.llm_call('qwen2.5:3b', cfg.agents.agenda_report, result_text)
+            resp = llm.call(cfg.agents.agenda_report, m.content, model='qwen2.5:3b')
             report = resp.get("content", result_text)
             if not report:
                 report = result_text

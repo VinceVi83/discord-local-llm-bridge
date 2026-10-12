@@ -5,7 +5,7 @@ from thefuzz import fuzz
 from datetime import datetime
 from pathlib import Path
 from datetime import timedelta
-from config_loader import cfg
+from common.conf_manager import cfg
 import logging
 logger = logging.getLogger(__name__)
 

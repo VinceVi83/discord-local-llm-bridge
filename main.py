@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Optional
 
-from config_loader import cfg, setup_logging
+from common.conf_manager import cfg, setup_logging
 from discord_bot import DiscordBot
 import logging
 
