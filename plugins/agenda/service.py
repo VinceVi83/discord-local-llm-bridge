@@ -1,20 +1,14 @@
-import asyncio
-import json
 import logging
-import vobject
-import requests
-import traceback
-from datetime import datetime, timedelta
-from pathlib import Path
-from common.conf_manager import cfg, Utils
-from common.llm_client import llm
-from plugins.agenda.my_calendar import CalendarService
 import hashlib
+import traceback
+from datetime import datetime, date, timedelta
+from pathlib import Path
 import json
+from common.conf_manager import cfg, Utils, setup_logging
+from plugins.agenda.my_calendar import CalendarService
 
+setup_logging()
 logger = logging.getLogger(__name__)
-calendar_plugin = CalendarService()
-
 LOCK_PATH = Path("/tmp/agenda_notification.lock")
 
 def scheduled(autostart=False, **config):
@@ -24,8 +18,6 @@ def scheduled(autostart=False, **config):
         return func
     return decorator
 
-async def handle_agenda(self, m):
-    await asyncio.to_thread(manage_request, self, m)
 
 def get_event_hash(summary):
     return hashlib.md5(summary.encode('utf-8')).hexdigest()
@@ -33,9 +25,20 @@ def get_event_hash(summary):
 def parse_datetime(raw_dt):
     if isinstance(raw_dt, dict):
         raw_dt = raw_dt.get('date') or raw_dt.get('dateTime')
-    if not isinstance(raw_dt, datetime):
-        raw_dt = datetime.combine(raw_dt, datetime.min.time())
-    return raw_dt
+
+    if isinstance(raw_dt, str):
+        raw_dt = raw_dt.replace("Z", "+00:00")
+        raw_dt = datetime.fromisoformat(raw_dt)
+
+    if isinstance(raw_dt, datetime):
+        if raw_dt.tzinfo is not None:
+            raw_dt = raw_dt.replace(tzinfo=None)
+        return raw_dt
+
+    if isinstance(raw_dt, date):
+        return datetime.combine(raw_dt, datetime.min.time())
+
+    raise TypeError(f"Unsupported datetime type: {type(raw_dt)} = {raw_dt!r}")
 
 def parse_event_datetime(event):
     raw_dt = event.get('start') or event.get('dtstart') or event.get('dt')
@@ -46,16 +49,17 @@ def parse_end_event_datetime(event):
     return parse_datetime(raw_dt)
 
 def is_event_for_today(event_datetime):
-    return event_datetime.date() == datetime.now().date()
+    now = datetime.now()
+    return now - timedelta(minutes=5) <= event_datetime <= now + timedelta(hours=24)
 
 def fire_alarm(bot, event):
     summary = event.get('summary', 'Event')
     msg = f"**REMINDER**: '{summary}' starts in 2 hours!"
     files = []
-
     if "concert" in summary.lower():
         try:
-            concert_data = calendar_plugin.get_next_concert_data()
+            concert_data = json.loads(Utils.call_mcp_tool("get_next_concert"))
+            logger.info(f"Concert data: {concert_data}")
             if concert_data and concert_data.get('pdf'):
                 pdf_path = Path(cfg.agenda.path_concert) / concert_data['pdf']
                 if pdf_path.exists():
@@ -63,26 +67,9 @@ def fire_alarm(bot, event):
                     msg = f"**CONCERT**: '{summary}' in 2h!\nYour ticket is attached."
         except Exception as e:
             logger.error(f"Error retrieving PDF: {e}")
+            logger.error(traceback.format_exc())
 
-    try:
-        payload = {
-            "channel_name": cfg.bot.notification,
-            "msg": msg,
-            "attachments": files
-        }
-        response = requests.post(f"http://127.0.0.1:{cfg.system.port}/send", json=payload, timeout=15)
-
-        if response.status_code == 200:
-            logger.info(f"Notification sent for '{summary}'")
-            event_hash = get_event_hash(summary)
-            LOCK_PATH.write_text(event_hash)
-            logger.info(f"Stored hash {event_hash} in {LOCK_PATH}")
-        else:
-            logger.error(f"Send failed ({response.status_code}): {response.text}")
-
-    except Exception as e:
-        logger.error(f"Critical error in fire_alarm dispatch: {e}")
-
+    Utils.send_discord_notification(msg, channel=cfg.bot.notification, files=files)
     event_datetime = parse_end_event_datetime(event)
     run_time = event_datetime + timedelta(minutes=30)
     bot.scheduler.add_job(
@@ -93,170 +80,11 @@ def fire_alarm(bot, event):
     )
     logger.info(f"Rescheduling sync task for {run_time}")
 
-def generate_ics_from_template(output_path, name_event, date, location):
-    with open(cfg.agenda.ics_template, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    now = datetime.now().strftime("%Y%m%dT%H%M%S")
-    uid = f"{now}-{name_event.replace(' ', '_')}@bot"
-
-    try:
-        start_dt = datetime.strptime(date, "%Y%m%dT%H%M%S")
-        dtend = (start_dt + timedelta(hours=3)).strftime("%Y%m%dT%H%M%S")
-    except Exception:
-        dtend = date
-
-    formatted_content = content.format(
-        uid=uid,
-        now=now,
-        artist=name_event,
-        dtstart=date,
-        dtend=dtend,
-        location=location
-    )
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(formatted_content)
-
-def _execute_save(bot, m):
-    system_prompt_event = cfg.agents.agenda_extract_event_name
-    if m.attachments:
-        system_prompt_event = cfg.agents.agenda_extract_artist
-        path = Path(cfg.agenda.path_concert) / "concerts.json"
-        index = {}
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    index = json.load(f)
-            except Exception as e:
-                logger.error(f"Error reading JSON: {e}")
-
-    resp_event = llm.call(system_prompt_event, m.content, model='qwen2.5:3b')
-    event = json.loads(resp_event['content']).get("event", "Unknown")
-
-    resp_venue = llm.call(cfg.agents.agenda_extract_venue, m.content, model='qwen2.5:3b')
-    venue = json.loads(resp_venue['content']).get("location", "Unknown")
-
-    now = datetime.now().strftime("%Y%m%dT%H%M%S")
-    agent_date = cfg.agents.agenda_extract_date.replace('{now}', now)
-    resp_date = llm.call(agent_date, m.content, model='qwen2.5:3b')
-    date = json.loads(resp_date['content']).get("date")
-
-    logger.debug(f"_execute_save extract data : {event} | {venue} | {date} ")
-    if m.attachments:
-        already_exists = any(
-            item.get("data", {}).get("event", "").lower() == event.lower() or
-            item.get("data", {}).get("date") == date
-            for item in index.values()
-        )
-
-        if already_exists:
-            return f"**{event}** or this date is already in the calendar."
-
-        attachment = m.attachments[0]
-        filename = attachment.filename
-        save_dir = Path(cfg.agenda.path_concert)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        r = requests.get(attachment.url)
-        with open(save_dir / filename, 'wb') as f:
-            f.write(r.content)
-
-        index[filename] = {
-            "status": "ics_pending",
-            "data": {
-                "artist": event,
-                "venue": venue,
-                "date": date
-            },
-            "event": None
-        }
-
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(index, f, indent=4, ensure_ascii=False)
-        event = 'Concert : ' + event
-
-    ics_path = Path(cfg.agenda.path_concert) / f"{event}.ics"
-    try:
-        logger.info(f"Attempt to create ICS : {ics_path}")
-        generate_ics_from_template(ics_path, event, date, venue)
-
-        if not ics_path.exists():
-            logger.error(f"FAILURE: The file {ics_path} does not exist after calling generate_ics_from_template")
-            files_to_send = []
-        else:
-            logger.info(f"SUCCESS: ICS file created.")
-            files_to_send = [str(ics_path)]
-
-    except Exception as e:
-        logger.error(f"Error during ICS generation: {e}")
-        files_to_send = []
-
-    Utils.send_discord_notification(
-        f"Event to add: **{event}**",
-        channel=m.channel.name,
-        files=files_to_send
-    )
-    bot.loop.call_soon_threadsafe(lambda: asyncio.create_task(m.add_reaction("✅")))
-
-    return f"Ticket saved for **{event}**"
-
-def manage_request(bot, m):
-    try:
-        if m.attachments:
-            result_text = _execute_save(bot, m)
-            return
-        resp = llm.call(cfg.agents.agenda_router, m.content, model='qwen2.5:3b')
-        action = json.loads(resp['content']).get("action")
-        if not action:
-            bot.loop.call_soon_threadsafe(lambda: asyncio.create_task(m.add_reaction("❌")))
-            return
-
-        files = None
-
-        if action == "SAVE_EVENT":
-            result_text = _execute_save(bot, m)
-            return
-
-        elif action == "NEXT_CONCERT":
-            concert = calendar_plugin.get_next_concert_data()
-            result_text = f"Next Concert: {concert['summary']} on {concert['dt']}" if concert else "No concerts found."
-        elif action == "NEXT_RDV":
-            events = calendar_plugin.fetch_calendar_events(limit=1)
-            result_text = f"Next Appointment: {events[0]['summary']} ({events[0]['dt'].strftime('%Y/%m/%d')})" if events else "No appointments found."
-        elif action == "CURRENT_WEEK":
-            events = calendar_plugin.get_week_events(offset=0)
-            result_text = _format_week("This Week", events)
-        elif action == "NEXT_WEEK":
-            events = calendar_plugin.get_week_events(offset=1)
-            result_text = _format_week("Next Week", events)
-
-        if result_text:
-            resp = llm.call(cfg.agents.agenda_report, m.content, model='qwen2.5:3b')
-            report = resp.get("content", result_text)
-            if not report:
-                report = result_text
-            bot.loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(bot.send_smart_split(m.channel, report, files=files))
-            )
-
-    except Exception as e:
-        logger.error(f"Agenda Router Error: {e}")
-        bot.loop.call_soon_threadsafe(lambda: asyncio.create_task(m.add_reaction("❌")))
-
-
-def _format_week(label, events):
-    if not events:
-        return f"No events for {label}."
-    return f"**{label}:**\n" + "\n".join([f"• {e['dt'].strftime('%a %d')}: {e['summary']}" for e in events])
-
 @scheduled(autostart=True, trigger="cron", hour=6, minute=0)
 def task_sync_daily_alarm(bot):
     try:
-        events = calendar_plugin.fetch_calendar_events(limit=1)
-        if not events:
-            return
-
-        event = events[0]
+        event = json.loads(Utils.call_mcp_tool("get_next_calendar_event"))
+        logger.info(f"Next event: {event}")
         summary = event.get('summary', 'Unknown')
         current_hash = get_event_hash(summary)
 
@@ -293,6 +121,5 @@ def task_sync_daily_alarm(bot):
                     replace_existing=True
                 )
             )
-
     except Exception as e:
         logger.error(f"ERROR : {e}\n{traceback.format_exc()}")

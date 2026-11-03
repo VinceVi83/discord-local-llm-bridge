@@ -1,4 +1,5 @@
 import discord, asyncio, threading, queue, traceback, os, subprocess, requests
+import tempfile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from ollama_config import OllamaConfig
@@ -7,10 +8,14 @@ from common.llm_client import llm, llm_async
 from discord_janitor import DiscordJanitor
 from whisper_engine import WhisperEngine
 from pathlib import Path
+from attachment_router import classify_attachment
 import importlib
 import logging
 
 logger = logging.getLogger(__name__)
+
+MAX_TEXT_FILE_SIZE = 1024 * 1024
+MAX_TEXT_FILE_CHARS = 50000
 
 class DiscordBot(commands.Bot):
     """Discord Bot for AI-powered chat interactions
@@ -273,7 +278,7 @@ class DiscordBot(commands.Bot):
             try:
                 if not self.whisper_ready or self.whisper is None:
                     await m.channel.send(f'<@!{m.author.id}> Transcription failed, remote whisper KO and local whisper not init.')
-                    return False
+                    return "Failed: local whisper not init."
                 path = f'/tmp/{m.id}.ogg'
                 await m.attachments[0].save(path)
                 text = await asyncio.to_thread(self.whisper.transcribe, path)
@@ -282,14 +287,82 @@ class DiscordBot(commands.Bot):
                     os.remove(path)
             except Exception as e:
                 await m.channel.send(f'<@!{m.author.id}> Local transcription failed. {e}')
-                return False
+                return "Failed: local whisper KO."
         if text:
-            m.content = text
-            m.attachments = []
-            return True
+            await m.channel.send(f'<@!{m.author.id}> Transcription success {text}.')
+            return text
         else:
             await m.channel.send(f'<@!{m.author.id}> Transcription failed: no text returned.')
-            return False
+            return "Failed: no text returned."
+
+    @staticmethod
+    async def _read_text_attachment(attachment):
+        if getattr(attachment, 'size', 0) > MAX_TEXT_FILE_SIZE:
+            raise ValueError('Text files are limited to 1 MB.')
+
+        data = await attachment.read()
+        if len(data) > MAX_TEXT_FILE_SIZE:
+            raise ValueError('Text files are limited to 1 MB.')
+        try:
+            text = data.decode('utf-8-sig')
+        except UnicodeDecodeError as e:
+            raise ValueError('The text file must use UTF-8 encoding.') from e
+        if len(text) > MAX_TEXT_FILE_CHARS:
+            text = text[:MAX_TEXT_FILE_CHARS] + '\n[File content truncated.]'
+        return text
+
+    async def process_attachments(self, m):
+        transcriptions = []
+        attachment_content = []
+        has_text_file = False
+        unsupported = []
+
+        for attachment in m.attachments:
+            attachment_type = classify_attachment(
+                attachment.filename,
+                attachment.content_type,
+                is_voice_message=getattr(getattr(attachment, 'flags', None), 'voice_message', False)
+            )
+            try:
+                if attachment_type == 'audio':
+                    text = await self.transcribe_audio(m)
+                    if text:
+                        transcriptions.append(f'[Voice transcription: {attachment.filename}]\n{text}')
+                elif attachment_type == 'pdf':
+                    attachment_content.append(
+                        f'[PDF attachment: {attachment.filename}]\n{attachment.url}'
+                    )
+                elif attachment_type == 'text':
+                    text = await self._read_text_attachment(attachment)
+                    attachment_content.append(
+                        f'[Attached text file: {attachment.filename}]\n'
+                        f'{text}\n[/Attached text file: {attachment.filename}]'
+                    )
+                    has_text_file = True
+                else:
+                    unsupported.append(attachment.filename)
+            except Exception as e:
+                logger.warning('Could not process attachment %s: %s', attachment.filename, e)
+                await m.channel.send(f'<@!{m.author.id}> Could not process `{attachment.filename}`: {e}')
+
+        if unsupported:
+            names = ', '.join(f'`{name}`' for name in unsupported)
+            await m.channel.send(
+                f'<@!{m.author.id}> Unsupported attachment type: {names}. '
+                'This format can be handled by adding an attachment-specific handler.'
+            )
+
+        original_content = (m.content or '').strip()
+        if original_content and has_text_file:
+            original_content = f'[Original message]\n{original_content}\n[/Original message]'
+        message_parts = transcriptions
+        if original_content:
+            message_parts.append(original_content)
+        message_parts.extend(attachment_content)
+        if message_parts:
+            m.content = '\n\n'.join(message_parts)
+        logger.info(f'Processed attachments for message {m.id}. Updated content length: {len(m.content)}\n{m.content}')
+        return bool((m.content or '').strip())
 
     async def on_message(self, m):
         if m.content.startswith('!'):
@@ -300,8 +373,7 @@ class DiscordBot(commands.Bot):
             return
 
         if m.attachments:
-            async with m.channel.typing():
-                await self.transcribe_audio(m)
+            await self.process_attachments(m)
 
         if m.channel.name.startswith('note-'):
             return
