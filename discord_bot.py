@@ -3,7 +3,7 @@ import tempfile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from ollama_config import OllamaConfig
-from common.conf_manager import cfg, setup_logging, Utils
+from common.conf_manager import cfg, Utils
 from common.llm_client import llm, llm_async
 from discord_janitor import DiscordJanitor
 from whisper_engine import WhisperEngine

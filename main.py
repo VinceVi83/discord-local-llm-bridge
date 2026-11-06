@@ -8,11 +8,10 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Optional
 
-from common.conf_manager import cfg, setup_logging
+from common.conf_manager import cfg
 from discord_bot import DiscordBot
 import logging
 
-setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -115,8 +114,8 @@ async def send_notification(notif: Notification):
 async def start_services():
     config = uvicorn.Config(
         app, 
-        host=cfg.system.host, 
-        port=cfg.system.port, 
+        host=cfg.common.discord.host, 
+        port=cfg.common.discord.port, 
         log_level=cfg.system.log_level,
         loop="asyncio"
     )

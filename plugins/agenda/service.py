@@ -4,10 +4,8 @@ import traceback
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
-from common.conf_manager import cfg, Utils, setup_logging
-from plugins.agenda.my_calendar import CalendarService
+from common.conf_manager import cfg, Utils
 
-setup_logging()
 logger = logging.getLogger(__name__)
 LOCK_PATH = Path("/tmp/agenda_notification.lock")
 
@@ -17,7 +15,6 @@ def scheduled(autostart=False, **config):
         func.schedule_config = config
         return func
     return decorator
-
 
 def get_event_hash(summary):
     return hashlib.md5(summary.encode('utf-8')).hexdigest()

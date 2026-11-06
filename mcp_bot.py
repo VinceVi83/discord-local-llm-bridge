@@ -3,7 +3,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 import asyncio
-from common.conf_manager import cfg, setup_logging, Utils
+from common.conf_manager import cfg, Utils
 from common.llm_client import llm, llm_async
 import logging
 
@@ -112,5 +112,4 @@ async def main():
     await bot.close()
 
 if __name__ == "__main__":
-    setup_logging()
     asyncio.run(main())
