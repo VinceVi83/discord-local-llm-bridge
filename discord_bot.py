@@ -272,7 +272,6 @@ class DiscordBot(commands.Bot):
         try:
             result = await llm_async.transcribe(m.attachments[0].url)
             text = result['content']
-            await m.channel.send(f'<@!{m.author.id}> Transcription: {text}')
         except Exception as e:
             logger.warning(f"Remote transcription failed: {e}")
             try:

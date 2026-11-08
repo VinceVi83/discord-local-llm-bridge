@@ -1,20 +1,34 @@
 bot:
-  token: "YOUR_DISCORD_TOKEN_HERE"
-  status: "online"
-  activity: "Alisu Bridge"
+  token: "<DISCORD_BOT_TOKEN>"
+  notification: "<DISCORD_NOTIFICATION_CHANNEL_NAME>"
+  status: "<BOT_STATUS>"
+  activity: "<BOT_ACTIVITY>"
   channels:
-    notify: "notify-me"
-    multiroom: "multiroom"
-    os_prefix: "os-"
+    os_prefix: "<OS_CHANNEL_PREFIX>"
+    notify: "<NOTIFY_CHANNEL_NAME>"
+    multiroom: "<MULTIROOM_CHANNEL_NAME>"
+  cmdlist:
+    agendaR: sudo systemctl restart agenda-task.service
+    mcpR: sudo systemctl restart mcp-server-dllb-skills.service
+    discordR: sudo systemctl restart alisubot.service
+    multiR: sudo systemctl restart multiroom-hub.service
+    restart: sudo /usr/local/bin/multiroom-restart
+    reboot: sudo reboot
+    wan: curl -s ifconfig.me
+    lan: hostname -I | awk '{print $1}'
+  infolist:
+    agenda: https://#wan#:9500/gui https://#lan#:9500/gui
+    tierlist: https://#wan#:8888 https://#lan#:8888
+  ignore_channel:
+    notify: notify-
+    agenda: agenda-
+    ignore: ignore-
 system:
-  host: "0.0.0.0"
-  port: 8000
-  log_level: "info"
-  purge_on_start: true
+  host: "<API_LISTEN_HOST>"
+  port: "<API_LISTEN_PORT>"
+  log_level: "<LOG_LEVEL>"
 whisper:
-    mode: CPU
-    language: fr
-    skip: skip
+  mode: "<CPU>"
+  language: "<fr>"
 agenda:
-    link_calendar: link_calendar
-    ics_template: plugins/agenda/template_concert.ics
+  path_concert: "<CONCERT_PDF_DIRECTORY>"
