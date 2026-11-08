@@ -25,8 +25,7 @@ python -m pip install discord.py fastapi uvicorn pydantic requests APScheduler f
 No dependency/lock file is provided; the list above is based on imports. `mcp_bot.py` also requires the `mcp` package.
 
 ## Configuration
-See [`config_example.yaml`](config_example.yaml) for keys observed in the code; adapt it to the external manager in the `common` submodule.
-Replace placeholder values locally and do not publish any secrets. The path/format loaded by `common` is not documented here.
+Complete the `config.yaml` file created in `~/Documents/Projectdir` at execution, using [`config_example.yaml`](config_example.yaml) as a reference. Replace the placeholders with your own values and never share your credentials.
 
 ## Launch
 

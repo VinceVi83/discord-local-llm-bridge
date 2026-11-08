@@ -430,9 +430,7 @@ class DiscordBot(commands.Bot):
             try:
                 conf = self.get_config_from_topic(task['topic'])
                 res = llm.call(conf.system_prompt, task['content'], model='qwen3.8:27b', mode='creative', timeout=300)
-                logger.info(f'LLM Response: {res}')
                 res = res['content']
-                logger.info(f'LLM Response: {res}')
 
                 loop.call_soon_threadsafe(task['done_event'].set)
                 payload = {
@@ -440,7 +438,7 @@ class DiscordBot(commands.Bot):
                     'msg': f'<@!{task["author_id"]}> {res}',
                     'reply_to': task['message_id']
                 }
-                requests.post(f'http://127.0.0.1:{cfg.system.port}/send', json=payload, timeout=15)
+                requests.post(f'http://127.0.0.1:{cfg.common.discord.port}/send', json=payload, timeout=15)
             except:
                 traceback.print_exc()
             finally:
