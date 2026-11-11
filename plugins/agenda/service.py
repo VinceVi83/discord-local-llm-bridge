@@ -51,6 +51,7 @@ def is_event_for_today(event_datetime):
 
 def fire_alarm(bot, event):
     summary = event.get('summary', 'Event')
+    LOCK_PATH.write_text(get_event_hash(summary))
     msg = f"**REMINDER**: '{summary}' starts in 2 hours!"
     files = []
     if "concert" in summary.lower():
@@ -77,6 +78,23 @@ def fire_alarm(bot, event):
     )
     logger.info(f"Rescheduling sync task for {run_time}")
 
+def _schedule_next_daily(bot, when=None):
+    if when is None:
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        when = datetime.combine(tomorrow, datetime.min.time()).replace(hour=6)
+    logger.info(f"Scheduling next daily sync at {when}")
+    bot.loop.call_soon_threadsafe(
+        lambda: bot.scheduler.add_job(
+            task_sync_daily_alarm,
+            "date",
+            run_date=when,
+            args=[bot],
+            id="daily_agenda_sync",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+    )
+
 @scheduled(autostart=True, trigger="cron", hour=6, minute=0)
 def task_sync_daily_alarm(bot):
     try:
@@ -101,7 +119,8 @@ def task_sync_daily_alarm(bot):
         event_datetime = parse_event_datetime(event)
 
         if not is_event_for_today(event_datetime):
-            logger.info(f"'{summary}' is not for today.")
+            logger.info(f"'{summary}' is not for today. Next check tomorrow 06:00.")
+            _schedule_next_daily(bot)
             return
 
         alarm_time = event_datetime - timedelta(hours=2)
